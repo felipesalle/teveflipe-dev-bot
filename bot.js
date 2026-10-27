@@ -66,19 +66,42 @@ async function handleMessage(msg) {
     return;
   }
 
+  // Intención explícita de desarrollo/código (solo aquí se deben generar scripts/workflows)
+  const isDevIntent = lower.includes('script') || 
+    lower.includes('workflow') || 
+    lower.includes('programa') || 
+    lower.includes('programar') || 
+    lower.includes('código') || 
+    lower.includes('codigo') || 
+    lower.includes('desarrolla') || 
+    lower.includes('crea un') || 
+    lower.includes('haz un') ||
+    lower.includes('automatiza');
+
   // Detección de intención de búsqueda de contenido (lenguaje natural o comando /buscar)
-  const isSearchQuery = lower.startsWith('/buscar ') || 
-    lower.startsWith('buscar ') || 
-    lower.startsWith('dónde está ') || 
-    lower.startsWith('donde esta ') || 
-    lower.startsWith('tenemos ') ||
-    lower.startsWith('está la serie ') ||
-    lower.startsWith('esta la serie ') ||
-    lower.startsWith('está la peli ') ||
-    lower.startsWith('esta la peli ') ||
-    lower.includes('tenemos la serie') ||
-    lower.includes('tenemos la película') ||
-    lower.includes('tenemos la pelicula');
+  const isSearchQuery = !isDevIntent && (
+    lower.startsWith('/buscar') || 
+    lower.startsWith('buscar') || 
+    lower.startsWith('busca') || 
+    lower.startsWith('buscame') || 
+    lower.startsWith('búscame') || 
+    lower.startsWith('dónde está') || 
+    lower.startsWith('donde esta') || 
+    lower.startsWith('dónde esta') || 
+    lower.startsWith('donde está') || 
+    lower.startsWith('tenemos') ||
+    lower.startsWith('está ') ||
+    lower.startsWith('esta ') ||
+    lower.startsWith('hay ') ||
+    lower.startsWith('encuentra') ||
+    lower.startsWith('mira si') ||
+    lower.startsWith('revisa si') ||
+    lower.startsWith('fíjate si') ||
+    lower.startsWith('fijate si') ||
+    lower.includes('tenemos') ||
+    lower.includes('buscar') ||
+    lower.includes('busca')
+  );
 
   if (isSearchQuery) {
     await handleSearchContent(chatId, text);

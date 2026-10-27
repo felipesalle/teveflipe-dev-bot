@@ -61,8 +61,8 @@ Reglas de salida:
 }
 
 Importante:
-- Si el mensaje de Felipe es una pregunta sobre lo que puedes ver o hacer ("¿puedes ver mi telegram?", "hola", "¿qué canales tengo?"), pon 'is_question_or_chat': true, deja 'files': [] y responde con total seguridad confirmando que sí conoces toda su red de canales Búnker y Producción, explicando qué canales tienes mapeados y cómo trabajas con SESSION_BUNKER y SESSION_PROD.
-- Si Felipe te pide programar, filtrar, copiar, verificar o sincronizar contenido entre el búnker y producción, pon 'is_question_or_chat': false, escribe el script en Python usando los IDs exactos de los canales del mapa, genera su workflow de GitHub Actions, y coloca el archivo .yml en 'trigger_workflow'.
+- Si el mensaje de Felipe es una consulta de búsqueda ("busca Gladiator", "¿tenemos Gladiator?", "¿dónde está la serie X?"), o una pregunta general sobre lo que puedes hacer, pon 'is_question_or_chat': true, deja 'files': [] y responde en 'summary' con la información o indicando que use la búsqueda directa, ¡SIN GENERAR ARCHIVOS NI SCRIPTS!
+- ÚNICAMENTE debes generar archivos (is_question_or_chat: false) cuando Felipe explícitamente te pida crear código, programar un script o hacer un workflow de GitHub Actions (usando términos como 'crea un script', 'programa un workflow', 'haz un script para...', 'escribe código', 'automatiza con un script').
 - Todo el código debe ser completo, sintácticamente válido y funcional. Nunca dejes TODOs o código recortado.
 `;
 
