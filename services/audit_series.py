@@ -25,6 +25,15 @@ def load_env():
                     env[k.strip()] = v.strip()
     return env
 
+def format_size(size_bytes):
+    if not size_bytes:
+        return "0 KB"
+    if size_bytes >= 1024**3:
+        return f"{size_bytes / (1024**3):.2f} GB"
+    if size_bytes >= 1024**2:
+        return f"{size_bytes / (1024**2):.1f} MB"
+    return f"{size_bytes / 1024:.0f} KB"
+
 def extract_season_episode(text):
     if not text:
         return None, None
@@ -104,7 +113,7 @@ async def audit_series(series_query: str):
         return
 
     # Escanear todos los mensajes del tema encontrado
-    episodes_by_season = defaultdict(list)
+    episodes_by_season = defaultdict(lambda: defaultdict(list))
     total_messages = 0
 
     async for m in c.iter_messages(ent_target, reply_to=target_topic.id):
@@ -112,23 +121,35 @@ async def audit_series(series_query: str):
             continue
         total_messages += 1
         fn = m.file.name if m.file else (m.text or "")
+        size_bytes = m.file.size if m.file else 0
         s, e = extract_season_episode(fn)
         if s is not None and e is not None:
-            episodes_by_season[s].append((e, m.id, fn))
+            episodes_by_season[s][e].append({
+                "msg_id": m.id,
+                "name": fn,
+                "size_bytes": size_bytes,
+                "size_str": format_size(size_bytes),
+                "is_video": bool(m.video or (m.document and m.document.mime_type and 'video' in m.document.mime_type))
+            })
 
     await c.disconnect()
 
-    # Análisis de huecos y duplicados
+    # Análisis de huecos, multi-calidad y duplicados
     seasons_report = []
     missing_all = []
+    all_multi_calidad = []
+    all_redundantes = []
+    msg_ids_ligeras = []
+    msg_ids_cine = []
+    msg_ids_redundantes = []
 
     for s in sorted(episodes_by_season.keys()):
-        raw_list = episodes_by_season[s]
-        ep_numbers = [item[0] for item in raw_list]
+        eps_dict = episodes_by_season[s]
+        ep_numbers = sorted(eps_dict.keys())
         ep_set = set(ep_numbers)
         
-        min_e = min(ep_numbers)
-        max_e = max(ep_numbers)
+        min_e = min(ep_numbers) if ep_numbers else 1
+        max_e = max(ep_numbers) if ep_numbers else 0
         
         # Calcular huecos esperados
         start_e = 1 if min_e <= 1 else min_e
@@ -138,20 +159,52 @@ async def audit_series(series_query: str):
         for mep in missing_eps:
             missing_all.append(f"{s}x{mep:02d}")
 
-        # Detectar duplicados
-        counts = defaultdict(int)
-        for num in ep_numbers:
-            counts[num] += 1
-        dupes = [num for num, cnt in counts.items() if cnt > 1]
+        season_multi = []
+        season_dupes = []
 
+        for e in ep_numbers:
+            files = sorted(eps_dict[e], key=lambda x: x["size_bytes"])
+            if len(files) > 1:
+                # Comprobar si es Multi-Calidad (ej. Ligera <-> Cine)
+                f_min = files[0]
+                f_max = files[-1]
+                # Si el mayor es al menos 25% más grande que el menor, o difieren en tamaño relevante
+                is_multi = (f_max["size_bytes"] >= f_min["size_bytes"] * 1.25 and f_min["size_bytes"] > 0)
+                
+                if is_multi:
+                    season_multi.append({
+                        "ep": f"{s}x{e:02d}",
+                        "ligera": {"msg_id": f_min["msg_id"], "size": f_min["size_str"], "name": f_min["name"]},
+                        "cine": {"msg_id": f_max["msg_id"], "size": f_max["size_str"], "name": f_max["name"]}
+                    })
+                    msg_ids_ligeras.append(f_min["msg_id"])
+                    msg_ids_cine.append(f_max["msg_id"])
+                    
+                    # Si hay más de 2 archivos para el mismo capítulo, los intermedios son redundantes
+                    if len(files) > 2:
+                        for extra in files[1:-1]:
+                            season_dupes.append(f"{s}x{e:02d}")
+                            msg_ids_redundantes.append(extra["msg_id"])
+                else:
+                    # Mismo tamaño o muy similar -> Duplicado puro / redundante
+                    season_dupes.append(f"{s}x{e:02d}")
+                    # Guardamos el primero, los demás son redundantes
+                    for extra in files[1:]:
+                        msg_ids_redundantes.append(extra["msg_id"])
+
+        all_multi_calidad.extend(season_multi)
+        all_redundantes.extend(season_dupes)
+
+        total_files = sum(len(files) for files in eps_dict.values())
         seasons_report.append({
             "temporada": s,
-            "total_archivos": len(raw_list),
+            "total_archivos": total_files,
             "capitulos_unicos": len(ep_set),
             "rango": f"{min_e} a {max_e}",
             "completa": len(missing_eps) == 0,
             "faltantes": [f"{s}x{mep:02d}" for mep in missing_eps],
-            "duplicados": [f"{s}x{d:02d}" for d in dupes]
+            "multi_calidad": season_multi,
+            "duplicados_redundantes": season_dupes
         })
 
     clean_pid = str(abs(target_channel["produccion_id"]))
@@ -163,11 +216,17 @@ async def audit_series(series_query: str):
         "ok": True,
         "serie": target_topic.title,
         "topic_id": target_topic.id,
+        "channel_id": target_channel["produccion_id"],
         "canal": target_channel["nombre"],
         "link": topic_link,
         "total_mensajes": total_messages,
         "seasons": seasons_report,
-        "missing_all": missing_all
+        "missing_all": missing_all,
+        "total_multi_calidad": len(all_multi_calidad),
+        "total_redundantes": len(all_redundantes),
+        "msg_ids_ligeras": msg_ids_ligeras,
+        "msg_ids_cine": msg_ids_cine,
+        "msg_ids_redundantes": msg_ids_redundantes
     }
 
     print(json.dumps(result, ensure_ascii=False))

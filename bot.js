@@ -9,6 +9,8 @@ const execPromise = util.promisify(exec);
 
 // Estado en memoria para rastrear versiones anteriores encontradas en búsquedas
 let activePreviousVersionByChat = {};
+// Estado en memoria para acciones de auditoría de series (multi-calidad y purga)
+let activeSeriesAuditByTopic = {};
 
 /**
  * Manejador principal de cualquier actualización de Telegram (Webhook o Polling)
@@ -66,6 +68,23 @@ async function handleMessage(msg) {
 
   if (isAskingNovedades) {
     await handleCheckNovedades(chatId);
+    return;
+  }
+
+  // Detección de intención de auditoría completa de canal
+  const isAuditChannelQuery = lower.startsWith('/auditar_canal') || 
+    lower.startsWith('/auditarcanal') ||
+    lower.includes('auditame todo en canal') ||
+    lower.includes('auditame todo el canal') ||
+    lower.includes('audita todo el canal') ||
+    lower.includes('auditar todo el canal') ||
+    lower.includes('auditar canal') ||
+    lower.includes('audita el canal') ||
+    lower.includes('auditar canal de series') ||
+    lower.includes('audita canal de series');
+
+  if (isAuditChannelQuery) {
+    await handleAuditChannel(chatId, text);
     return;
   }
 
@@ -204,7 +223,8 @@ Solo escríbeme en lenguaje natural lo que deseas programar o crear.
 ⚡ <b>Comandos disponibles:</b>
 • /novedades - Escanear si hay contenido nuevo en los búnkers con títulos y sincronización.
 • /buscar &lt;título&gt; - Buscar películas o series en Producción y obtener enlace directo.
-• /auditar &lt;serie&gt; - Analizar temporadas, detectar capítulos faltantes y duplicados.
+• /auditar &lt;serie&gt; - Analizar temporadas, detectar capítulos faltantes, duplicados y multi-calidad.
+• /auditar_canal - Auditoría integral de todo el canal de Series TV de Producción.
 • /canales - Ver el mapa de los 15 canales Búnker y Producción de TeVeFLIPE.
 • /workflows - Ver y disparar workflows de GitHub Actions.
 • /status - Ver el estado de las últimas ejecuciones en GitHub Actions.
@@ -462,7 +482,7 @@ async function handleAuditSeries(chatId, rawText) {
     report += `📂 Canal: <b>${telegram.escapeHtml(data.canal)}</b> (Tema ID: <code>${data.topic_id}</code>)\n`;
     report += `🔗 <a href="${data.link}">Abrir Tema en Telegram</a>\n\n`;
 
-    const missingButtons = [];
+    const actionButtons = [];
 
     data.seasons.forEach(s => {
       const icon = s.completa ? '✅' : '⚠️';
@@ -472,7 +492,7 @@ async function handleAuditSeries(chatId, rawText) {
       if (!s.completa && s.faltantes.length > 0) {
         report += `   ❌ <b>Faltan:</b> <code>${s.faltantes.join(', ')}</code>\n`;
         s.faltantes.slice(0, 3).forEach(f => {
-          missingButtons.push([
+          actionButtons.push([
             {
               text: `🔍 Buscar ${telegram.escapeHtml(data.serie)} ${f} en Origen`,
               callback_data: `searchorig_${encodeURIComponent(`${data.serie} ${f}`)}`
@@ -481,17 +501,51 @@ async function handleAuditSeries(chatId, rawText) {
         });
       }
 
-      if (s.duplicados.length > 0) {
-        report += `   🔁 <i>Duplicados: ${s.duplicados.join(', ')}</i>\n`;
+      if (s.multi_calidad && s.multi_calidad.length > 0) {
+        report += `   💎 <i>Multi-Calidad: ${s.multi_calidad.length} caps con doble versión (Ligera MP4 + Cine MKV)</i>\n`;
+      }
+
+      if (s.duplicados_redundantes && s.duplicados_redundantes.length > 0) {
+        report += `   🔁 <i>Duplicados idénticos: ${s.duplicados_redundantes.join(', ')}</i>\n`;
       }
       report += `\n`;
     });
 
     if (data.missing_all.length === 0) {
-      report += `🎉 <b>¡La serie está completa al 100%! No falta ningún capítulo en la secuencia detectada.</b>`;
+      report += `🎉 <b>¡La serie está completa al 100%! No falta ningún capítulo en la secuencia detectada.</b>\n`;
     }
 
-    const replyMarkup = missingButtons.length > 0 ? { inline_keyboard: missingButtons } : undefined;
+    // Guardar contexto en caché para las acciones interactivas
+    activeSeriesAuditByTopic[data.topic_id] = {
+      channelId: data.channel_id,
+      topicId: data.topic_id,
+      serie: data.serie,
+      ligeras: data.msg_ids_ligeras || [],
+      cine: data.msg_ids_cine || [],
+      redundantes: data.msg_ids_redundantes || []
+    };
+
+    if (data.total_multi_calidad > 0) {
+      report += `\n💎 <b>Modo Multi-Calidad Activo (${data.total_multi_calidad} caps):</b>\n` +
+        `<i>La serie dispone de versiones ligeras para streaming rápido y versiones pesadas de cine en alta definición.</i>\n`;
+      
+      actionButtons.push([
+        { text: '🤝 Mantener Ambas (Multi-Calidad para la App)', callback_data: `multiact_keepboth_${data.topic_id}` }
+      ]);
+      actionButtons.push([
+        { text: '🌟 Dejar solo Calidad Máxima (~3 GB)', callback_data: `multiact_keephigh_${data.topic_id}` },
+        { text: '⚡ Dejar solo Versión Ligera (.mp4)', callback_data: `multiact_keeplow_${data.topic_id}` }
+      ]);
+    }
+
+    if (data.total_redundantes > 0) {
+      report += `\n⚠️ <b>${data.total_redundantes} archivos duplicados idénticos detectados.</b>\n`;
+      actionButtons.push([
+        { text: `🧹 Purgar Duplicados Idénticos (${data.total_redundantes})`, callback_data: `multiact_purgedupes_${data.topic_id}` }
+      ]);
+    }
+
+    const replyMarkup = actionButtons.length > 0 ? { inline_keyboard: actionButtons } : undefined;
 
     if (ackMsgId) {
       await telegram.editMessageText(chatId, ackMsgId, report, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: replyMarkup });
@@ -502,6 +556,80 @@ async function handleAuditSeries(chatId, rawText) {
   } catch (err) {
     console.error('Error auditando serie:', err);
     await telegram.sendMessage(chatId, `❌ Error en auditoría: ${err.message}`);
+  }
+}
+
+/**
+ * Auditoría general de todo el canal de Series TV de Producción
+ */
+async function handleAuditChannel(chatId, rawText) {
+  await telegram.sendChatAction(chatId, 'typing');
+  const ack = await telegram.sendMessage(
+    chatId,
+    `📊 <b>Iniciando auditoría general del canal de Series TV en Producción...</b>\n` +
+    `<i>Analizando temas de series, detectando capítulos faltantes, temporadas incompletas y multi-calidad. Espera unos momentos...</i>`,
+    { parse_mode: 'HTML' }
+  );
+  const ackMsgId = ack?.result?.message_id;
+
+  try {
+    const pythonScript = path.join(__dirname, 'services', 'audit_channel.py');
+    const { stdout } = await execPromise(`python "${pythonScript}" series_tv 35`);
+    
+    let data;
+    try {
+      data = JSON.parse(stdout.trim());
+    } catch {
+      throw new Error('No se pudo procesar la respuesta de auditoría del canal.');
+    }
+
+    if (!data.ok) throw new Error(data.error || 'Error desconocido');
+
+    let report = `📊 <b>AUDITORÍA INTEGRAL DEL CANAL</b>\n`;
+    report += `📂 Canal: <b>${telegram.escapeHtml(data.canal_nombre)}</b>\n`;
+    report += `⏱️ Tiempo de análisis: <code>${data.duracion_segundos}s</code>\n\n`;
+
+    report += `📈 <b>Resumen General:</b>\n`;
+    report += `▫️ Total Series Analizadas: <b>${data.total_series}</b>\n`;
+    report += `✅ Series 100% Completas: <b>${data.total_completas}</b>\n`;
+    report += `⚠️ Series con Capítulos Faltantes: <b>${data.total_incompletas}</b>\n`;
+    report += `💎 Series en Modo Multi-Calidad: <b>${data.total_multi_calidad}</b>\n`;
+    report += `🔁 Series con Duplicados Redundantes: <b>${data.total_con_dupes}</b>\n\n`;
+
+    const buttons = [];
+
+    if (data.incompletas && data.incompletas.length > 0) {
+      report += `⚠️ <b>Series Incompletas que Requieren Atención:</b>\n`;
+      data.incompletas.slice(0, 8).forEach((inc, idx) => {
+        report += `${idx + 1}. <a href="${inc.link}"><b>${telegram.escapeHtml(inc.title)}</b></a>: Faltan <code>${inc.faltantes.join(', ')}</code>` + (inc.faltantes_total > 5 ? ` <i>(+${inc.faltantes_total - 5} más)</i>` : '') + `\n`;
+        
+        buttons.push([
+          {
+            text: `🔍 Auditar a fondo: ${telegram.escapeHtml(inc.title).slice(0, 25)}`,
+            callback_data: `auditone_${encodeURIComponent(inc.title.slice(0, 30))}`
+          }
+        ]);
+      });
+      report += `\n`;
+    }
+
+    if (data.multi_calidad_ejemplos && data.multi_calidad_ejemplos.length > 0) {
+      report += `💎 <b>Series con Multi-Calidad detectadas:</b>\n<i>${data.multi_calidad_ejemplos.join(', ')}</i>\n\n`;
+    }
+
+    report += `💡 <i>Puedes auditar cualquier serie individual escribiendo: <code>/auditar &lt;nombre&gt;</code></i>`;
+
+    const replyMarkup = buttons.length > 0 ? { inline_keyboard: buttons.slice(0, 6) } : undefined;
+
+    if (ackMsgId) {
+      await telegram.editMessageText(chatId, ackMsgId, report, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: replyMarkup });
+    } else {
+      await telegram.sendMessage(chatId, report, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: replyMarkup });
+    }
+
+  } catch (err) {
+    console.error('Error en auditoría de canal:', err);
+    await telegram.sendMessage(chatId, `❌ Error en auditoría del canal: ${err.message}`);
   }
 }
 
@@ -819,6 +947,110 @@ async function handleCallbackQuery(cb) {
   if (data.startsWith('searchorig_')) {
     const rawQ = decodeURIComponent(data.replace('searchorig_', ''));
     await handleSearchOrigin(chatId, rawQ, cb.message.message_id);
+    return;
+  }
+
+  if (data.startsWith('auditone_')) {
+    const sTitle = decodeURIComponent(data.replace('auditone_', ''));
+    await handleAuditSeries(chatId, `/auditar ${sTitle}`);
+    return;
+  }
+
+  if (data.startsWith('multiact_keepboth_')) {
+    const topicId = data.replace('multiact_keepboth_', '');
+    const item = activeSeriesAuditByTopic[topicId];
+    const sName = item?.serie || 'la serie';
+    await telegram.editMessageText(
+      chatId,
+      cb.message.message_id,
+      `🤝 <b>Configuración confirmada para "${telegram.escapeHtml(sName)}":</b>\n\n` +
+      `Se mantienen ambas versiones (Ligera MP4 + Cine HD) para que la app TeVeFLIPE (${config.androidPackage || 'com.felipe.flipegramtv'}) ofrezca selección de calidad inteligente al reproducir.`,
+      { parse_mode: 'HTML' }
+    );
+    return;
+  }
+
+  if (data.startsWith('multiact_keephigh_')) {
+    const topicId = data.replace('multiact_keephigh_', '');
+    const item = activeSeriesAuditByTopic[topicId];
+    if (!item || !item.ligeras || item.ligeras.length === 0) {
+      await telegram.sendMessage(chatId, '⚠️ No se encontraron IDs de versiones ligeras para eliminar.');
+      return;
+    }
+    await telegram.editMessageText(
+      chatId,
+      cb.message.message_id,
+      `🗑️ <b>Eliminando ${item.ligeras.length} archivos de versiones ligeras...</b> Conservando solo Máxima Calidad Cine.`,
+      { parse_mode: 'HTML' }
+    );
+    try {
+      const pythonScript = path.join(__dirname, 'services', 'delete_content.py');
+      const midsStr = item.ligeras.join(',');
+      await execPromise(`python "${pythonScript}" "${item.channelId}" "${midsStr}"`);
+      await telegram.sendMessage(
+        chatId,
+        `🌟 <b>¡Limpieza completada!</b> Se eliminaron las versiones ligeras de <b>${telegram.escapeHtml(item.serie)}</b>. El canal conserva ahora únicamente los archivos en Máxima Calidad Cine.`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (e) {
+      await telegram.sendMessage(chatId, `❌ Error eliminando archivos: ${e.message}`);
+    }
+    return;
+  }
+
+  if (data.startsWith('multiact_keeplow_')) {
+    const topicId = data.replace('multiact_keeplow_', '');
+    const item = activeSeriesAuditByTopic[topicId];
+    if (!item || !item.cine || item.cine.length === 0) {
+      await telegram.sendMessage(chatId, '⚠️ No se encontraron IDs de versiones pesadas para eliminar.');
+      return;
+    }
+    await telegram.editMessageText(
+      chatId,
+      cb.message.message_id,
+      `🗑️ <b>Eliminando ${item.cine.length} archivos pesados de cine...</b> Conservando versión Ligera (.mp4).`,
+      { parse_mode: 'HTML' }
+    );
+    try {
+      const pythonScript = path.join(__dirname, 'services', 'delete_content.py');
+      const midsStr = item.cine.join(',');
+      await execPromise(`python "${pythonScript}" "${item.channelId}" "${midsStr}"`);
+      await telegram.sendMessage(
+        chatId,
+        `⚡ <b>¡Limpieza completada!</b> Se eliminaron las versiones pesadas de <b>${telegram.escapeHtml(item.serie)}</b>. El canal conserva ahora la versión ligera de carga ultra rápida.`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (e) {
+      await telegram.sendMessage(chatId, `❌ Error eliminando archivos: ${e.message}`);
+    }
+    return;
+  }
+
+  if (data.startsWith('multiact_purgedupes_')) {
+    const topicId = data.replace('multiact_purgedupes_', '');
+    const item = activeSeriesAuditByTopic[topicId];
+    if (!item || !item.redundantes || item.redundantes.length === 0) {
+      await telegram.sendMessage(chatId, '⚠️ No se encontraron IDs de duplicados redundantes para purgar.');
+      return;
+    }
+    await telegram.editMessageText(
+      chatId,
+      cb.message.message_id,
+      `🧹 <b>Purgando ${item.redundantes.length} duplicados redundantes...</b>`,
+      { parse_mode: 'HTML' }
+    );
+    try {
+      const pythonScript = path.join(__dirname, 'services', 'delete_content.py');
+      const midsStr = item.redundantes.join(',');
+      await execPromise(`python "${pythonScript}" "${item.channelId}" "${midsStr}"`);
+      await telegram.sendMessage(
+        chatId,
+        `🧹 <b>¡Purga completada!</b> Se eliminaron ${item.redundantes.length} archivos duplicados idénticos de <b>${telegram.escapeHtml(item.serie)}</b>.`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (e) {
+      await telegram.sendMessage(chatId, `❌ Error purgando duplicados: ${e.message}`);
+    }
     return;
   }
 
