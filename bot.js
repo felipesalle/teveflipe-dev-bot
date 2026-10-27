@@ -69,6 +69,24 @@ async function handleMessage(msg) {
     return;
   }
 
+  // Detección de intención de auditoría de episodios de series
+  const isAuditQuery = lower.startsWith('/auditar') || 
+    lower.startsWith('auditar') || 
+    lower.startsWith('audita') || 
+    lower.includes('faltan capítulos') || 
+    lower.includes('faltan capitulos') || 
+    lower.includes('faltan episodios') || 
+    lower.includes('comprobar capítulos') || 
+    lower.includes('comprobar capitulos') || 
+    lower.includes('auditar serie') ||
+    lower.includes('auditar la serie') ||
+    lower.includes('audita la serie');
+
+  if (isAuditQuery) {
+    await handleAuditSeries(chatId, text);
+    return;
+  }
+
   // Intención explícita de desarrollo/código (solo aquí se deben generar scripts/workflows)
   const isDevIntent = lower.includes('script') || 
     lower.includes('workflow') || 
@@ -186,6 +204,7 @@ Solo escríbeme en lenguaje natural lo que deseas programar o crear.
 ⚡ <b>Comandos disponibles:</b>
 • /novedades - Escanear si hay contenido nuevo en los búnkers con títulos y sincronización.
 • /buscar &lt;título&gt; - Buscar películas o series en Producción y obtener enlace directo.
+• /auditar &lt;serie&gt; - Analizar temporadas, detectar capítulos faltantes y duplicados.
 • /canales - Ver el mapa de los 15 canales Búnker y Producción de TeVeFLIPE.
 • /workflows - Ver y disparar workflows de GitHub Actions.
 • /status - Ver el estado de las últimas ejecuciones en GitHub Actions.
@@ -397,6 +416,92 @@ async function handleCheckNovedades(chatId) {
   } catch (err) {
     console.error('Error revisando novedades:', err);
     await telegram.sendMessage(chatId, `❌ Error consultando búnkers: ${err.message}`);
+  }
+}
+
+/**
+ * Auditar capítulos y temporadas de una serie en Producción
+ */
+async function handleAuditSeries(chatId, rawText) {
+  await telegram.sendChatAction(chatId, 'typing');
+
+  let cleanTitle = null;
+  try {
+    cleanTitle = await gemini.extractSearchEntity(rawText);
+  } catch (e) {
+    console.warn('Error en Gemini para auditar:', e.message);
+  }
+
+  if (!cleanTitle) {
+    cleanTitle = rawText.replace(/^(\/auditar|auditar|audita|audita la serie|auditar la serie)\s+/i, '').replace(/[?¿]/g, '').trim();
+  }
+
+  if (!cleanTitle) {
+    await telegram.sendMessage(chatId, '⚠️ Por favor indica el nombre de la serie que deseas auditar. Ej: <code>/auditar The Ark</code>', { parse_mode: 'HTML' });
+    return;
+  }
+
+  const ack = await telegram.sendMessage(chatId, `📊 <b>Auditando episodios de "<code>${telegram.escapeHtml(cleanTitle)}</code>" en Producción...</b>`, { parse_mode: 'HTML' });
+  const ackMsgId = ack?.result?.message_id;
+
+  try {
+    const pythonScript = path.join(__dirname, 'services', 'audit_series.py');
+    const safeTitle = cleanTitle.replace(/"/g, '\\"');
+    const { stdout } = await execPromise(`python "${pythonScript}" "${safeTitle}"`);
+
+    let data;
+    try {
+      data = JSON.parse(stdout.trim());
+    } catch {
+      throw new Error('No se pudo procesar la respuesta de auditoría.');
+    }
+
+    if (!data.ok) throw new Error(data.error || 'Error desconocido');
+
+    let report = `📊 <b>AUDITORÍA DE SERIE: ${telegram.escapeHtml(data.serie)}</b>\n`;
+    report += `📂 Canal: <b>${telegram.escapeHtml(data.canal)}</b> (Tema ID: <code>${data.topic_id}</code>)\n`;
+    report += `🔗 <a href="${data.link}">Abrir Tema en Telegram</a>\n\n`;
+
+    const missingButtons = [];
+
+    data.seasons.forEach(s => {
+      const icon = s.completa ? '✅' : '⚠️';
+      const statusText = s.completa ? 'Completa' : '<b>Incompleta</b>';
+      report += `${icon} <b>Temporada ${s.temporada}:</b> ${statusText} (${s.capitulos_unicos} caps, del ${s.rango})\n`;
+      
+      if (!s.completa && s.faltantes.length > 0) {
+        report += `   ❌ <b>Faltan:</b> <code>${s.faltantes.join(', ')}</code>\n`;
+        s.faltantes.slice(0, 3).forEach(f => {
+          missingButtons.push([
+            {
+              text: `🔍 Buscar ${telegram.escapeHtml(data.serie)} ${f} en Origen`,
+              callback_data: `searchorig_${encodeURIComponent(`${data.serie} ${f}`)}`
+            }
+          ]);
+        });
+      }
+
+      if (s.duplicados.length > 0) {
+        report += `   🔁 <i>Duplicados: ${s.duplicados.join(', ')}</i>\n`;
+      }
+      report += `\n`;
+    });
+
+    if (data.missing_all.length === 0) {
+      report += `🎉 <b>¡La serie está completa al 100%! No falta ningún capítulo en la secuencia detectada.</b>`;
+    }
+
+    const replyMarkup = missingButtons.length > 0 ? { inline_keyboard: missingButtons } : undefined;
+
+    if (ackMsgId) {
+      await telegram.editMessageText(chatId, ackMsgId, report, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: replyMarkup });
+    } else {
+      await telegram.sendMessage(chatId, report, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: replyMarkup });
+    }
+
+  } catch (err) {
+    console.error('Error auditando serie:', err);
+    await telegram.sendMessage(chatId, `❌ Error en auditoría: ${err.message}`);
   }
 }
 
