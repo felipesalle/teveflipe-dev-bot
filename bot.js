@@ -45,6 +45,12 @@ async function handleMessage(msg) {
     return;
   }
 
+  // Comando /canales o /bunkers
+  if (lower === '/canales' || lower === '/bunkers' || lower === 'canales') {
+    await sendCanalesMessage(chatId);
+    return;
+  }
+
   // Comando /workflows o /lista
   if (lower === '/workflows' || lower === '/wf' || lower === 'workflows') {
     await sendWorkflowsMenu(chatId);
@@ -75,6 +81,28 @@ async function handleMessage(msg) {
 }
 
 /**
+ * Lista de canales Búnker y Producción de TeVeFLIPE
+ */
+async function sendCanalesMessage(chatId) {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const canales = JSON.parse(fs.readFileSync(path.join(__dirname, 'canales_map.json'), 'utf-8'));
+
+    let text = `📡 <b>RED DE CANALES TEVEFLIPE (${canales.length} categorías)</b>\n\n`;
+    canales.forEach(c => {
+      text += `<b>${telegram.escapeHtml(c.nombre)}</b>\n`;
+      text += `  📥 <b>Búnker:</b> <code>${c.bunker_id}</code> (${c.bunker_nombre}${c.topic_id ? ' - Topic ' + c.topic_id : ''})\n`;
+      text += `  📤 <b>Producción:</b> <code>${c.produccion_id}</code> (${c.is_forum ? 'Foro/Temas' : 'Canal'})\n\n`;
+    });
+
+    await telegram.sendMessage(chatId, text, { parse_mode: 'HTML' });
+  } catch (err) {
+    await telegram.sendMessage(chatId, `❌ Error cargando canales: ${err.message}`);
+  }
+}
+
+/**
  * Menú de Ayuda
  */
 async function sendHelpMessage(chatId) {
@@ -90,6 +118,7 @@ Solo escríbeme en lenguaje natural lo que deseas programar o crear.
 • <code>"Crea un script para verificar si faltan capítulos de series retro y añade un workflow con dispatch."</code>
 
 ⚡ <b>Comandos disponibles:</b>
+• /canales - Ver el mapa de los 15 canales Búnker y Producción de TeVeFLIPE.
 • /workflows - Ver y disparar workflows de GitHub Actions.
 • /status - Ver el estado de las últimas 5 ejecuciones en GitHub Actions.
 • /run &lt;nombre&gt; - Ejecutar un workflow directamente.
