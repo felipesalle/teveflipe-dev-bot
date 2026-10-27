@@ -123,14 +123,15 @@
   {
     "id": "series_turcas",
     "nombre": "✨ Series Turcas y Telenovelas - TeVeFLIPE",
-    "bunker_id": -1004433726485,
-    "bunker_nombre": "Series Turcas y Telenovelas",
+    "bunker_id": -1002160549536,
+    "bunker_nombre": "Series Turcas",
     "produccion_id": -1004415457188,
     "invite_link": "https://t.me/+tvXNYjhQjokzOWQ5",
     "categoria": "series",
     "is_forum": true,
     "ultimo_id_sincronizado": 4193,
-    "activo": true
+    "activo": true,
+    "topic_id": 5
   },
   {
     "id": "series_retro",
