@@ -66,13 +66,23 @@ async function handleMessage(msg) {
     return;
   }
 
-  // Comando /buscar <título> o preguntas de búsqueda
-  if (lower.startsWith('/buscar ') || lower.startsWith('buscar ') || lower.startsWith('dónde está ') || lower.startsWith('donde esta ') || lower.startsWith('tenemos ')) {
-    const q = text.replace(/^(\/buscar|buscar|dónde está|donde esta|tenemos)\s+/i, '').replace(/[?¿]/g, '').trim();
-    if (q) {
-      await handleSearchContent(chatId, q);
-      return;
-    }
+  // Detección de intención de búsqueda de contenido (lenguaje natural o comando /buscar)
+  const isSearchQuery = lower.startsWith('/buscar ') || 
+    lower.startsWith('buscar ') || 
+    lower.startsWith('dónde está ') || 
+    lower.startsWith('donde esta ') || 
+    lower.startsWith('tenemos ') ||
+    lower.startsWith('está la serie ') ||
+    lower.startsWith('esta la serie ') ||
+    lower.startsWith('está la peli ') ||
+    lower.startsWith('esta la peli ') ||
+    lower.includes('tenemos la serie') ||
+    lower.includes('tenemos la película') ||
+    lower.includes('tenemos la pelicula');
+
+  if (isSearchQuery) {
+    await handleSearchContent(chatId, text);
+    return;
   }
 
   // Comando /canales o /bunkers
@@ -365,16 +375,39 @@ async function handleCheckNovedades(chatId) {
 }
 
 /**
- * Buscar contenido en canales de Producción
+ * Buscar contenido en canales de Producción con corrección inteligente de IA
  */
-async function handleSearchContent(chatId, query) {
-  const ack = await telegram.sendMessage(chatId, `🔍 <b>Buscando "<code>${telegram.escapeHtml(query)}</code>" en Producción...</b>`, { parse_mode: 'HTML' });
+async function handleSearchContent(chatId, rawText) {
+  await telegram.sendChatAction(chatId, 'typing');
+
+  // 1. Extraer título canónico y corregir typos con Gemini
+  let targetQuery = null;
+  try {
+    targetQuery = await gemini.extractSearchEntity(rawText);
+  } catch (e) {
+    console.warn('Error en Gemini extractSearchEntity:', e.message);
+  }
+
+  // Fallback por regex si Gemini no responde
+  if (!targetQuery) {
+    targetQuery = rawText.replace(/^(\/buscar|buscar|dónde está|donde esta|tenemos|está la serie|esta la serie|está la peli|esta la peli|la serie|la película|la pelicula)\s+/i, '').replace(/[?¿]/g, '').trim();
+  }
+
+  if (!targetQuery) {
+    await telegram.sendMessage(chatId, '⚠️ Por favor indica el título de la película o serie que deseas buscar.');
+    return;
+  }
+
+  const queryNote = (targetQuery.toLowerCase() !== rawText.toLowerCase().replace(/[?¿]/g, '').trim())
+    ? `🔍 <b>Buscando "<code>${telegram.escapeHtml(targetQuery)}</code>" en Producción...</b>\n<i>(Interpretado de: "${telegram.escapeHtml(rawText)}")</i>`
+    : `🔍 <b>Buscando "<code>${telegram.escapeHtml(targetQuery)}</code>" en Producción...</b>`;
+
+  const ack = await telegram.sendMessage(chatId, queryNote, { parse_mode: 'HTML' });
   const ackMsgId = ack?.result?.message_id;
 
   try {
     const pythonScript = path.join(__dirname, 'services', 'search_content.py');
-    // Escapar comillas dobles para la terminal
-    const safeQuery = query.replace(/"/g, '\\"');
+    const safeQuery = targetQuery.replace(/"/g, '\\"');
     const { stdout } = await execPromise(`python "${pythonScript}" "${safeQuery}"`);
 
     let data;
@@ -388,7 +421,7 @@ async function handleSearchContent(chatId, query) {
 
     const resultados = data.resultados || [];
     if (resultados.length === 0) {
-      const notFoundText = `❌ No se encontró ningún resultado para "<b>${telegram.escapeHtml(query)}</b>" en los canales de Producción.`;
+      const notFoundText = `❌ No se encontró ningún resultado para "<b>${telegram.escapeHtml(targetQuery)}</b>" en los canales de Producción.`;
       if (ackMsgId) {
         await telegram.editMessageText(chatId, ackMsgId, notFoundText, { parse_mode: 'HTML' });
       } else {
@@ -397,13 +430,18 @@ async function handleSearchContent(chatId, query) {
       return;
     }
 
-    let report = `🔎 <b>RESULTADOS PARA: "${telegram.escapeHtml(query)}"</b>\n\n`;
+    let report = `🔎 <b>RESULTADOS PARA: "${telegram.escapeHtml(targetQuery)}"</b>\n\n`;
 
     resultados.forEach(r => {
-      report += `📂 <b>${telegram.escapeHtml(r.canal)}</b> (${r.coincidencias} coincidencias):\n`;
+      report += `📂 <b>${telegram.escapeHtml(r.canal)}</b>:\n`;
       r.items.slice(0, 4).forEach(it => {
-        report += `• <b>${telegram.escapeHtml(it.file_name)}</b>\n`;
-        report += `  📅 ${it.date} | 🔗 <a href="${it.link}">Abrir en Telegram</a>\n`;
+        if (it.tipo === 'tema') {
+          report += `• 📺 <b>Tema del Foro: ${telegram.escapeHtml(it.title)}</b>\n`;
+          report += `  🔗 <a href="${it.link}">Abrir Tema en Telegram</a>\n`;
+        } else {
+          report += `• 🎬 <b>${telegram.escapeHtml(it.title)}</b>\n`;
+          report += `  📅 ${it.date} | 🔗 <a href="${it.link}">Abrir Archivo en Telegram</a>\n`;
+        }
       });
       report += `\n`;
     });

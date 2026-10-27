@@ -112,6 +112,44 @@ async function generateCodeAndWorkflow(userPrompt) {
   }
 }
 
+/**
+ * Extrae y corrige el término canónico de búsqueda a partir de una pregunta en lenguaje natural
+ */
+async function extractSearchEntity(userText) {
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent?key=${config.geminiApiKey}`;
+    const prompt = `Extrae únicamente el nombre canónico o corregido de la película o serie que el usuario quiere buscar en su catálogo multimedia de Telegram.
+Corrige faltas ortográficas, palabras desordenadas o errores tipográficos (por ejemplo 'zaul' -> 'azul', 'gladeador' -> 'gladiador').
+Elimina palabras de relleno como 'tenemos', 'la serie', 'la peli', 'película', 'en producción', 'dónde está', signos de interrogación, etc.
+Responde estrictamente con el título limpio en una sola línea, sin comillas ni explicaciones adicionales.
+
+Texto del usuario: "${userText}"`;
+
+    const payload = {
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.1 }
+    };
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const title = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (title && title.length > 1 && title.length < 80) {
+        return title.replace(/["']/g, '').trim();
+      }
+    }
+  } catch (err) {
+    console.warn('Fallback sin Gemini para búsqueda:', err.message);
+  }
+  return null;
+}
+
 module.exports = {
-  generateCodeAndWorkflow
+  generateCodeAndWorkflow,
+  extractSearchEntity
 };
