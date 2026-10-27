@@ -1266,6 +1266,21 @@ async function startPolling() {
   console.log(`🔒 Administrador autorizado: ${config.adminId}`);
   console.log(`📁 Repositorio objetivo: ${config.githubOwner}/${config.githubRepo}`);
 
+  // Iniciar servidor HTTP mínimo para health-check de Koyeb / Render / Cloud
+  const http = require('http');
+  const PORT = process.env.PORT || 8000;
+  try {
+    const server = http.createServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('🤖 TeVeFLIPE DevBot is running 24/7 on Koyeb!\n');
+    });
+    server.listen(PORT, () => {
+      console.log(`🌐 Health-check HTTP server escuchando en puerto ${PORT}`);
+    });
+  } catch (e) {
+    console.warn('[HTTP Server Warning]:', e.message);
+  }
+
   let offset = 0;
 
   // Enviar mensaje de aviso a Telegram si está configurado
