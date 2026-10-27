@@ -445,10 +445,17 @@ async function handleSearchContent(chatId, rawText) {
     const resultados = data.resultados || [];
     if (resultados.length === 0) {
       const notFoundText = `❌ No se encontró ningún resultado para "<b>${telegram.escapeHtml(targetQuery)}</b>" en los canales de Producción.`;
+      const originBtn = {
+        inline_keyboard: [
+          [
+            { text: '🔍 ¿Buscar en Canales Origen / Fuentes?', callback_data: `searchorig_${encodeURIComponent(targetQuery.slice(0, 30))}` }
+          ]
+        ]
+      };
       if (ackMsgId) {
-        await telegram.editMessageText(chatId, ackMsgId, notFoundText, { parse_mode: 'HTML' });
+        await telegram.editMessageText(chatId, ackMsgId, notFoundText, { parse_mode: 'HTML', reply_markup: originBtn });
       } else {
-        await telegram.sendMessage(chatId, notFoundText, { parse_mode: 'HTML' });
+        await telegram.sendMessage(chatId, notFoundText, { parse_mode: 'HTML', reply_markup: originBtn });
       }
       return;
     }
@@ -469,15 +476,83 @@ async function handleSearchContent(chatId, rawText) {
       report += `\n`;
     });
 
+    const betterBtn = {
+      inline_keyboard: [
+        [
+          { text: '💎 ¿Buscar mejor versión en Canales Origen?', callback_data: `searchorig_${encodeURIComponent(targetQuery.slice(0, 30))}` }
+        ]
+      ]
+    };
+
     if (ackMsgId) {
-      await telegram.editMessageText(chatId, ackMsgId, report, { parse_mode: 'HTML', disable_web_page_preview: true });
+      await telegram.editMessageText(chatId, ackMsgId, report, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: betterBtn });
     } else {
-      await telegram.sendMessage(chatId, report, { parse_mode: 'HTML', disable_web_page_preview: true });
+      await telegram.sendMessage(chatId, report, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: betterBtn });
     }
 
   } catch (err) {
     console.error('Error buscando contenido:', err);
     await telegram.sendMessage(chatId, `❌ Error en búsqueda: ${err.message}`);
+  }
+}
+
+/**
+ * Buscar en canales origen (Fuentes de Nivel 1)
+ */
+async function handleSearchOrigin(chatId, query, messageId) {
+  const loadingText = `🔍 <b>Buscando "<code>${telegram.escapeHtml(query)}</code>" en Canales Origen (Películas, Series, Comunidad Castellana)...</b>`;
+  if (messageId) {
+    await telegram.editMessageText(chatId, messageId, loadingText, { parse_mode: 'HTML' });
+  } else {
+    await telegram.sendMessage(chatId, loadingText, { parse_mode: 'HTML' });
+  }
+
+  try {
+    const pythonScript = path.join(__dirname, 'services', 'search_origin.py');
+    const safeQuery = query.replace(/"/g, '\\"');
+    const { stdout } = await execPromise(`python "${pythonScript}" "${safeQuery}"`);
+
+    let data;
+    try {
+      data = JSON.parse(stdout.trim());
+    } catch {
+      throw new Error('No se pudo procesar la respuesta de canales origen.');
+    }
+
+    if (!data.ok) throw new Error(data.error || 'Error desconocido');
+
+    const resultados = data.resultados || [];
+    if (resultados.length === 0) {
+      const notFound = `❌ Tampoco se encontró contenido para "<b>${telegram.escapeHtml(query)}</b>" en los canales origen de Películas, Series o Comunidad Castellana.`;
+      if (messageId) {
+        await telegram.editMessageText(chatId, messageId, notFound, { parse_mode: 'HTML' });
+      } else {
+        await telegram.sendMessage(chatId, notFound, { parse_mode: 'HTML' });
+      }
+      return;
+    }
+
+    let report = `💎 <b>OPCIONES ENCONTRADAS EN CANALES ORIGEN: "${telegram.escapeHtml(query)}"</b>\n\n`;
+
+    resultados.forEach(r => {
+      report += `📥 <b>${telegram.escapeHtml(r.canal)}</b>:\n`;
+      r.items.slice(0, 5).forEach((it, idx) => {
+        const bestTag = (idx === 0 && it.size_mb > 1000) ? ' 🌟 <i>(Mayor tamaño)</i>' : '';
+        report += `• <b>${telegram.escapeHtml(it.title)}</b>${bestTag}\n`;
+        report += `  ⚖️ Peso: <b>${it.size_str || 'N/A'}</b> | 📅 ${it.date}\n`;
+        report += `  🔗 <a href="${it.link}">Ver en Canal Origen</a>\n\n`;
+      });
+    });
+
+    if (messageId) {
+      await telegram.editMessageText(chatId, messageId, report, { parse_mode: 'HTML', disable_web_page_preview: true });
+    } else {
+      await telegram.sendMessage(chatId, report, { parse_mode: 'HTML', disable_web_page_preview: true });
+    }
+
+  } catch (err) {
+    console.error('Error buscando en canales origen:', err);
+    await telegram.sendMessage(chatId, `❌ Error consultando canales origen: ${err.message}`);
   }
 }
 
@@ -489,6 +564,12 @@ async function handleCallbackQuery(cb) {
   const data = cb.data;
 
   await telegram.answerCallbackQuery(cb.id, 'Procesando...');
+
+  if (data.startsWith('searchorig_')) {
+    const rawQ = decodeURIComponent(data.replace('searchorig_', ''));
+    await handleSearchOrigin(chatId, rawQ, cb.message.message_id);
+    return;
+  }
 
   if (data === 'sync_now') {
     try {
