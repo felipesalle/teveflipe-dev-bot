@@ -54,6 +54,30 @@ async function handleMessage(msg) {
     return;
   }
 
+  // Saludos y comprobación de estado ("hola", "buenas", "ey", "hol", etc.)
+  const isGreeting = /^(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|ey|hey|eo|est[aá]s ah[ií]|sigues ah[ií]|hol|saludos)\b/i.test(lower.trim());
+  if (isGreeting) {
+    await telegram.sendMessage(
+      chatId,
+      `👋 <b>¡Hola Felipe!</b> Aquí estoy activo en la nube 24/7 y listo para lo que necesites.\n\n` +
+      `💡 <b>¿Qué deseas hacer?</b>\n` +
+      `• 🎬 <b>Buscar:</b> <code>"¿Tenemos Avatar 2?"</code>\n` +
+      `• 📥 <b>Novedades:</b> <code>"¿Hay algo nuevo?"</code>\n` +
+      `• 📊 <b>Auditar Serie:</b> <code>"/auditar The Ark"</code>\n` +
+      `• 📂 <b>Auditar Canal:</b> <code>"/auditar_canal"</code>\n` +
+      `• 🛠️ <b>Programar:</b> <code>"Crea un script para..."</code>`,
+      { parse_mode: 'HTML' }
+    );
+    return;
+  }
+
+  // Agradecimientos y confirmaciones casuales
+  const isAcknowledge = /^(ok|vale|gracias|perfecto|entendido|de acuerdo|bien|listo)\b/i.test(lower.trim());
+  if (isAcknowledge) {
+    await telegram.sendMessage(chatId, '👍 ¡Entendido! Aquí sigo 24/7 si necesitas algo más.');
+    return;
+  }
+
   // Comando /novedades o preguntas sobre revisar contenido nuevo en búnkers
   const isAskingNovedades = lower === '/novedades' || 
     lower.includes('contenido nuevo') || 

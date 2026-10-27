@@ -67,49 +67,71 @@ Importante:
 `;
 
 async function generateCodeAndWorkflow(userPrompt) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent?key=${config.geminiApiKey}`;
+  const modelsToTry = [
+    config.geminiModel || 'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-flash-latest'
+  ];
 
-  const payload = {
-    contents: [
-      {
-        parts: [
-          {
-            text: `${SYSTEM_PROMPT}\n\nInstrucción de Felipe:\n"${userPrompt}"`
-          }
-        ]
+  let lastError = null;
+
+  for (const model of modelsToTry) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.geminiApiKey}`;
+
+    const payload = {
+      contents: [
+        {
+          parts: [
+            {
+              text: `${SYSTEM_PROMPT}\n\nInstrucción de Felipe:\n"${userPrompt}"`
+            }
+          ]
+        }
+      ],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0.2
       }
-    ],
-    generationConfig: {
-      responseMimeType: 'application/json',
-      temperature: 0.2
+    };
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        // Si es 503 o 429 (sobrecarga), reintentar con el siguiente modelo de fallback
+        if (res.status === 503 || res.status === 429) {
+          console.warn(`[Gemini Overload]: Modelo ${model} devolvió ${res.status}. Probando modelo de respaldo...`);
+          lastError = new Error(`Gemini API Error [${res.status}]: ${errorText}`);
+          continue;
+        }
+        throw new Error(`Gemini API Error [${res.status}]: ${errorText}`);
+      }
+
+      const data = await res.json();
+      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (!rawText) {
+        throw new Error('Gemini no retornó contenido en la respuesta.');
+      }
+
+      const parsed = JSON.parse(rawText);
+      return parsed;
+
+    } catch (err) {
+      lastError = err;
+      if (err.message.includes('503') || err.message.includes('429')) {
+        continue;
+      }
+      throw err;
     }
-  };
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-
-  if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`Gemini API Error [${res.status}]: ${errorText}`);
   }
 
-  const data = await res.json();
-  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-  if (!rawText) {
-    throw new Error('Gemini no retornó contenido en la respuesta.');
-  }
-
-  try {
-    const parsed = JSON.parse(rawText);
-    return parsed;
-  } catch (err) {
-    console.error('Error parseando JSON de Gemini:', rawText);
-    throw new Error('La respuesta de Gemini no tuvo un formato JSON válido.');
-  }
+  throw lastError || new Error('No se pudo conectar con Gemini.');
 }
 
 /**
