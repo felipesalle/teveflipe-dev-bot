@@ -477,28 +477,47 @@ async function handleSearchContent(chatId, rawText) {
     }
 
     let report = `🔎 <b>RESULTADOS PARA: "${telegram.escapeHtml(targetQuery)}"</b>\n\n`;
+    const searchBetterButtons = [];
+    let optionIndex = 0;
 
     resultados.forEach(r => {
       report += `📂 <b>${telegram.escapeHtml(r.canal)}</b>:\n`;
       r.items.slice(0, 4).forEach(it => {
+        optionIndex++;
+        const sizeTag = it.size_str ? ` [${it.size_str}]` : '';
         if (it.tipo === 'tema') {
-          report += `• 📺 <b>Tema del Foro: ${telegram.escapeHtml(it.title)}</b>\n`;
-          report += `  🔗 <a href="${it.link}">Abrir Tema en Telegram</a>\n`;
+          report += `<b>${optionIndex}.</b> 📺 <b>Tema del Foro: ${telegram.escapeHtml(it.title)}</b>\n`;
+          report += `   🔗 <a href="${it.link}">Abrir Tema en Telegram</a>\n\n`;
         } else {
-          report += `• 🎬 <b>${telegram.escapeHtml(it.title)}</b>\n`;
-          report += `  📅 ${it.date} | 🔗 <a href="${it.link}">Abrir Archivo en Telegram</a>\n`;
+          report += `<b>${optionIndex}.</b> 🎬 <b>${telegram.escapeHtml(it.title)}</b>${sizeTag}\n`;
+          report += `   📅 ${it.date} | 🔗 <a href="${it.link}">Abrir Archivo en Telegram</a>\n\n`;
         }
+
+        let cleanForSearch = it.title.replace(/\.(mkv|mp4|avi|ts|mov)$/i, '').replace(/[_\(\)]/g, ' ').replace(/\s+/g, ' ').trim();
+        cleanForSearch = cleanForSearch.slice(0, 30);
+
+        searchBetterButtons.push({
+          num: optionIndex,
+          cleanTitle: cleanForSearch,
+          display: it.title.slice(0, 24)
+        });
       });
-      report += `\n`;
     });
 
-    const betterBtn = {
-      inline_keyboard: [
-        [
-          { text: '💎 ¿Buscar mejor versión en Canales Origen?', callback_data: `searchorig_${encodeURIComponent(targetQuery.slice(0, 30))}` }
-        ]
-      ]
-    };
+    const inlineKeyboard = [];
+    if (searchBetterButtons.length === 1) {
+      inlineKeyboard.push([
+        { text: '💎 ¿Buscar mejor versión en Canales Origen?', callback_data: `searchorig_${encodeURIComponent(searchBetterButtons[0].cleanTitle)}` }
+      ]);
+    } else if (searchBetterButtons.length > 1) {
+      searchBetterButtons.slice(0, 3).forEach(b => {
+        inlineKeyboard.push([
+          { text: `💎 Mejor versión de #${b.num} (${b.display})`, callback_data: `searchorig_${encodeURIComponent(b.cleanTitle)}` }
+        ]);
+      });
+    }
+
+    const betterBtn = inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined;
 
     if (ackMsgId) {
       await telegram.editMessageText(chatId, ackMsgId, report, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: betterBtn });

@@ -120,6 +120,7 @@ async function extractSearchEntity(userText) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent?key=${config.geminiApiKey}`;
     const prompt = `Extrae únicamente el nombre canónico o corregido de la película o serie que el usuario quiere buscar en su catálogo multimedia de Telegram.
 Corrige faltas ortográficas, palabras desordenadas o errores tipográficos (por ejemplo 'zaul' -> 'azul', 'gladeador' -> 'gladiador').
+Preserva siempre el año de estreno si el usuario lo menciona o escribe números (ej: 'titanic 1997' -> 'Titanic 1997', 'avatar 2009' -> 'Avatar 2009', 'el padrino 1972' -> 'El Padrino 1972').
 Elimina palabras de relleno como 'tenemos', 'la serie', 'la peli', 'película', 'en producción', 'dónde está', signos de interrogación, etc.
 Responde estrictamente con el título limpio en una sola línea, sin comillas ni explicaciones adicionales.
 

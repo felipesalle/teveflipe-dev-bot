@@ -28,6 +28,28 @@ def load_env():
                     env[k.strip()] = v.strip()
     return env
 
+def matches_query(raw_title: str, query: str) -> bool:
+    if not raw_title:
+        return False
+    title_lower = raw_title.lower()
+
+    y_m = re.search(r'\b(19\d\d|20\d\d)\b', query)
+    req_year = y_m.group(1) if y_m else None
+
+    clean_q = re.sub(r'\b(19\d\d|20\d\d)\b', '', query).strip()
+    q_words = [w.lower() for w in clean_q.split() if len(w) > 1]
+
+    # Coincidencia de palabra completa
+    for w in q_words:
+        if not re.search(r'\b' + re.escape(w) + r'\b', title_lower):
+            return False
+
+    # Coincidencia de año estricta si fue pedido
+    if req_year and req_year not in title_lower:
+        return False
+
+    return True
+
 def is_direct_video(fn):
     if not fn:
         return False
@@ -39,7 +61,6 @@ def is_direct_video(fn):
 def clean_display_title(fn, txt):
     s = fn or (txt.split('\n')[0] if txt else '')
     s = s.replace('_', ' ').strip()
-    # Limpiar extension
     s = re.sub(r'\.(mkv|mp4|avi|ts|mov)$', '', s, flags=re.IGNORECASE)
     return s[:65]
 
@@ -57,7 +78,7 @@ async def search_in_origins(query: str):
     await c.connect()
 
     results = []
-    q_words = [w.lower() for w in query.split() if len(w) > 2]
+    clean_keyword = re.sub(r'\b(19\d\d|20\d\d)\b', '', query).strip() or query
 
     for canal in ORIGIN_CHANNELS:
         cid = canal["id"]
@@ -70,10 +91,9 @@ async def search_in_origins(query: str):
         try:
             ent = await c.get_input_entity(cid)
             video_matches = []
-            other_matches = []
+            rar_packs = {}  # Agrupar partes .rar por nombre base
 
-            # Escanear hasta 120 coincidencias para no perder versiones en el historial
-            async for m in c.iter_messages(ent, search=query, limit=120):
+            async for m in c.iter_messages(ent, search=clean_keyword, limit=120):
                 if not m.file and not m.text:
                     continue
 
@@ -81,23 +101,17 @@ async def search_in_origins(query: str):
                 txt = (m.text.split('\n')[0][:70] if m.text else '')
                 raw_title = fn or txt or ""
 
-                if not raw_title:
+                if not raw_title or not matches_query(raw_title, query):
                     continue
 
-                # Filtrado de relevancia: asegurar que al menos una palabra clave relevante esté en el título
-                raw_lower = raw_title.lower()
-                if q_words and not any(w in raw_lower for w in q_words):
-                    continue
+                size_bytes = m.file.size if m.file else 0
+                size_mb = round(size_bytes / (1024**2), 1)
 
-                size_mb = 0
                 size_str = ""
-                if m.file:
-                    size_bytes = m.file.size
-                    if size_bytes >= 1024**3:
-                        size_str = f"{round(size_bytes / (1024**3), 2)} GB"
-                    else:
-                        size_str = f"{round(size_bytes / (1024**2), 1)} MB"
-                    size_mb = round(size_bytes / (1024**2), 1)
+                if size_bytes >= 1024**3:
+                    size_str = f"{round(size_bytes / (1024**3), 2)} GB"
+                else:
+                    size_str = f"{size_mb} MB"
 
                 item = {
                     "msg_id": m.id,
@@ -113,19 +127,36 @@ async def search_in_origins(query: str):
 
                 if is_direct_video(fn):
                     video_matches.append(item)
-                else:
-                    # No incluir partes individuales de rar (.part02, .part03...) para evitar saturar
-                    if not re.search(r'\.part0?[2-9]\d*\.rar', raw_lower):
-                        other_matches.append(item)
+                elif fn and re.search(r'\.part\d+\.rar', fn.lower()):
+                    # Agrupar partes de rar
+                    base_name = re.sub(r'\.part\d+\.rar', '', fn, flags=re.IGNORECASE)
+                    if base_name not in rar_packs:
+                        rar_packs[base_name] = {
+                            "item": item,
+                            "count": 0,
+                            "total_bytes": 0
+                        }
+                    rar_packs[base_name]["count"] += 1
+                    rar_packs[base_name]["total_bytes"] += size_bytes
+
+            # Procesar packs de rar agrupados
+            rar_matches = []
+            for bname, pack in rar_packs.items():
+                p_it = pack["item"]
+                tb = pack["total_bytes"]
+                tb_str = f"{round(tb / (1024**3), 2)} GB" if tb >= 1024**3 else f"{round(tb / (1024**2), 1)} MB"
+                p_it["title"] = f"{clean_display_title(bname, '')} [Pack {pack['count']} partes RAR]"
+                p_it["size_str"] = tb_str
+                p_it["size_mb"] = round(tb / (1024**2), 1)
+                rar_matches.append(p_it)
 
             # Priorizar videos directos (.mkv, .mp4) ordenados de mayor a menor tamaño
             video_matches.sort(key=lambda x: x["size_mb"], reverse=True)
-            other_matches.sort(key=lambda x: x["size_mb"], reverse=True)
+            rar_matches.sort(key=lambda x: x["size_mb"], reverse=True)
 
-            # Combinar dando prioridad a videos directos
-            final_items = video_matches[:5]
-            if len(final_items) < 3 and other_matches:
-                final_items.extend(other_matches[:3 - len(final_items)])
+            final_items = video_matches[:4]
+            if len(final_items) < 3 and rar_matches:
+                final_items.extend(rar_matches[:3 - len(final_items)])
 
             if final_items:
                 results.append({
@@ -148,5 +179,5 @@ async def search_in_origins(query: str):
     }, ensure_ascii=False))
 
 if __name__ == '__main__':
-    q = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "Gladiator"
+    q = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "Titanic 1997"
     asyncio.run(search_in_origins(q))
