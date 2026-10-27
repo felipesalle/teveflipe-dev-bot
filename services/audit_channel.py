@@ -44,6 +44,11 @@ def extract_season_episode(text):
         return 1, int(m4.group(1))
     return None, None
 
+def normalize_title(title: str) -> str:
+    t = re.sub(r'\(?\d{4}\)?', '', title)
+    t = re.sub(r'[\-_.]', ' ', t)
+    return re.sub(r'\s+', ' ', t).lower().strip()
+
 async def audit_channel(channel_id_or_key: str = 'series_tv', max_topics: int = 50):
     t0 = time.time()
     env = load_env()
@@ -62,10 +67,7 @@ async def audit_channel(channel_id_or_key: str = 'series_tv', max_topics: int = 
 
     target_channel = None
     for c_item in canales:
-        if c_item.get('id') == channel_id_or_key:
-            target_channel = c_item
-            break
-        if str(c_item.get('produccion_id')) == str(channel_id_or_key):
+        if c_item.get('id') == channel_id_or_key or str(c_item.get('produccion_id')) == str(channel_id_or_key):
             target_channel = c_item
             break
 
@@ -85,14 +87,15 @@ async def audit_channel(channel_id_or_key: str = 'series_tv', max_topics: int = 
     prod_id = target_channel['produccion_id']
     ent = await c.get_input_entity(prod_id)
 
+    # 1. Obtener todos los temas del canal
     all_topics = []
     offset_date = 0
     offset_id = 0
     offset_topic = 0
-    effective_limit = 250 if max_topics <= 0 else max_topics
+    effective_limit = 260 if max_topics <= 0 else max_topics
 
     while len(all_topics) < effective_limit:
-        batch_limit = min(50, effective_limit - len(all_topics))
+        batch_limit = min(80, effective_limit - len(all_topics))
         res = await c(GetForumTopicsRequest(
             peer=ent,
             offset_date=offset_date,
@@ -119,6 +122,29 @@ async def audit_channel(channel_id_or_key: str = 'series_tv', max_topics: int = 
 
     all_topics = all_topics[:effective_limit]
 
+    # 2. Agrupar por título normalizado para detectar temas duplicados
+    topics_by_series = defaultdict(list)
+    for t in all_topics:
+        norm = normalize_title(t.title)
+        topics_by_series[norm].append(t)
+
+    series_with_duplicate_topics = []
+    topics_to_scan = []
+
+    for norm, t_list in topics_by_series.items():
+        if len(t_list) > 1:
+            series_with_duplicate_topics.append({
+                "series": t_list[0].title,
+                "count": len(t_list),
+                "topics": [{"id": t.id, "title": t.title} for t in t_list]
+            })
+            # El tema principal suele ser el que tiene mayor top_message o mayor antigüedad,
+            # pero los escaneamos para saber cuál es el completo
+            topics_to_scan.append(t_list[0])
+        else:
+            topics_to_scan.append(t_list[0])
+
+    # 3. Escanear temas concurrentemente
     sem = asyncio.Semaphore(6)
 
     async def scan_topic(topic):
@@ -129,7 +155,7 @@ async def audit_channel(channel_id_or_key: str = 'series_tv', max_topics: int = 
                 if m.action:
                     continue
                 total_msgs += 1
-                fn = m.file.name if m.file else (m.text or "")
+                fn = m.file.name if (m.file and m.file.name) else (m.text or "")
                 size_bytes = m.file.size if m.file else 0
                 s, e = extract_season_episode(fn)
                 if s is not None and e is not None:
@@ -178,17 +204,17 @@ async def audit_channel(channel_id_or_key: str = 'series_tv', max_topics: int = 
                 "link": link,
                 "total_messages": total_msgs,
                 "total_capitulos": total_caps,
-                "completa": len(missing) == 0,
+                "completa": len(missing) == 0 and total_caps > 0,
                 "faltantes": missing,
                 "has_multi_calidad": has_multi,
                 "has_dupes": has_dupes
             }
 
-    results = await asyncio.gather(*[scan_topic(t) for t in all_topics])
+    results = await asyncio.gather(*[scan_topic(t) for t in topics_to_scan])
     await c.disconnect()
 
-    completas = [r for r in results if r["completa"] and r["total_capitulos"] > 0]
-    incompletas = [r for r in results if not r["completa"]]
+    completas = [r for r in results if r["completa"]]
+    incompletas = [r for r in results if not r["completa"] and r["total_capitulos"] > 0]
     multi_calidad = [r for r in results if r["has_multi_calidad"]]
     con_dupes = [r for r in results if r["has_dupes"]]
 
@@ -197,11 +223,14 @@ async def audit_channel(channel_id_or_key: str = 'series_tv', max_topics: int = 
         "canal_nombre": target_channel["nombre"],
         "canal_id": prod_id,
         "duracion_segundos": round(time.time() - t0, 1),
-        "total_series": len(results),
+        "total_temas_escaneados": len(all_topics),
+        "total_series_unicas": len(topics_to_scan),
         "total_completas": len(completas),
         "total_incompletas": len(incompletas),
+        "total_series_con_temas_duplicados": len(series_with_duplicate_topics),
         "total_multi_calidad": len(multi_calidad),
         "total_con_dupes": len(con_dupes),
+        "temas_duplicados_ejemplos": [s["series"] for s in series_with_duplicate_topics[:8]],
         "incompletas": [
             {
                 "id": inc["id"],
@@ -210,7 +239,7 @@ async def audit_channel(channel_id_or_key: str = 'series_tv', max_topics: int = 
                 "faltantes_total": len(inc["faltantes"]),
                 "link": inc["link"]
             }
-            for inc in incompletas[:15]
+            for inc in incompletas[:12]
         ],
         "multi_calidad_ejemplos": [r["title"] for r in multi_calidad[:8]],
         "redundantes_ejemplos": [r["title"] for r in con_dupes[:8]]
@@ -226,5 +255,5 @@ async def audit_channel(channel_id_or_key: str = 'series_tv', max_topics: int = 
 
 if __name__ == '__main__':
     target = sys.argv[1] if len(sys.argv) > 1 else 'series_tv'
-    limit = int(sys.argv[2]) if len(sys.argv) > 2 else 30
+    limit = int(sys.argv[2]) if len(sys.argv) > 2 else 40
     asyncio.run(audit_channel(target, limit))

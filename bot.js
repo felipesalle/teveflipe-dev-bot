@@ -545,6 +545,19 @@ async function handleAuditSeries(chatId, rawText) {
       ]);
     }
 
+    if (data.duplicate_topics && data.duplicate_topics.length > 0) {
+      report += `\n⚠️ <b>¡Alerta de Temas Duplicados en Producción!</b>\n` +
+        `Esta serie tiene más de un tema en el canal:\n` +
+        `• <b>Tema Principal:</b> <a href="${data.link}">Tema #${data.topic_id}</a> (${data.total_mensajes} mensajes)\n`;
+      data.duplicate_topics.forEach(dt => {
+        report += `• <b>Tema Duplicado Redundante:</b> <a href="${dt.link}">Tema #${dt.id}</a> (${dt.total_mensajes} mensajes)\n`;
+        actionButtons.push([
+          { text: `🗑️ Purgar Tema Duplicado #${dt.id} (${dt.total_mensajes} msgs)`, callback_data: `deletetopic_${data.channel_id}_${dt.id}` }
+        ]);
+      });
+      report += `\n`;
+    }
+
     const replyMarkup = actionButtons.length > 0 ? { inline_keyboard: actionButtons } : undefined;
 
     if (ackMsgId) {
@@ -590,9 +603,12 @@ async function handleAuditChannel(chatId, rawText) {
     report += `⏱️ Tiempo de análisis: <code>${data.duracion_segundos}s</code>\n\n`;
 
     report += `📈 <b>Resumen General:</b>\n`;
-    report += `▫️ Total Series Analizadas: <b>${data.total_series}</b>\n`;
+    report += `▫️ Total Series Analizadas: <b>${data.total_series_unicas || data.total_series}</b>\n`;
     report += `✅ Series 100% Completas: <b>${data.total_completas}</b>\n`;
     report += `⚠️ Series con Capítulos Faltantes: <b>${data.total_incompletas}</b>\n`;
+    if (data.total_series_con_temas_duplicados > 0) {
+      report += `👥 Series con Temas Duplicados en Producción: <b>${data.total_series_con_temas_duplicados}</b>\n`;
+    }
     report += `💎 Series en Modo Multi-Calidad: <b>${data.total_multi_calidad}</b>\n`;
     report += `🔁 Series con Duplicados Redundantes: <b>${data.total_con_dupes}</b>\n\n`;
 
@@ -861,8 +877,13 @@ async function handleCopyToBunker(chatId, fromCid, msgId, cType, messageId) {
     if (!data.ok) throw new Error(data.error || 'Error desconocido al copiar');
 
     let successMsg = `✅ <b>¡COPIADO CON ÉXITO AL BÚNKER!</b> 📥\n\n` +
-      `📦 <b>Nuevo Archivo:</b> <code>${telegram.escapeHtml(data.filename)}</code>\n` +
-      `📁 <b>Destino Búnker:</b> <b>${telegram.escapeHtml(data.bunker_name)}</b>\n\n`;
+      `📦 <b>Archivo:</b> <code>${telegram.escapeHtml(data.filename)}</code>\n` +
+      `📁 <b>Búnker Destino:</b> <b>${telegram.escapeHtml(data.bunker_name)}</b>\n`;
+
+    if (data.topic_title) {
+      successMsg += `🏷️ <b>Tema de Serie:</b> <b>${telegram.escapeHtml(data.topic_title)}</b> (ID: <code>${data.topic_id}</code>)\n`;
+    }
+    successMsg += `\n`;
 
     const oldVer = activePreviousVersionByChat[chatId];
     const syncButtons = [];
@@ -1050,6 +1071,30 @@ async function handleCallbackQuery(cb) {
       );
     } catch (e) {
       await telegram.sendMessage(chatId, `❌ Error purgando duplicados: ${e.message}`);
+    }
+    return;
+  }
+
+  if (data.startsWith('deletetopic_')) {
+    const parts = data.replace('deletetopic_', '').split('_');
+    const cid = parseInt(parts[0], 10);
+    const tid = parseInt(parts[1], 10);
+    await telegram.editMessageText(
+      chatId,
+      cb.message.message_id,
+      `🗑️ <b>Eliminando tema duplicado #${tid} de Producción...</b>`,
+      { parse_mode: 'HTML' }
+    );
+    try {
+      const pythonScript = path.join(__dirname, 'services', 'delete_topic.py');
+      await execPromise(`python "${pythonScript}" "${cid}" "${tid}"`);
+      await telegram.sendMessage(
+        chatId,
+        `✅ <b>¡Tema duplicado #${tid} eliminado con éxito de Producción!</b> El canal ahora conserva únicamente el tema principal.`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (e) {
+      await telegram.sendMessage(chatId, `❌ Error eliminando tema duplicado: ${e.message}`);
     }
     return;
   }

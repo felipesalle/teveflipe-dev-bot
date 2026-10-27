@@ -37,19 +37,15 @@ def format_size(size_bytes):
 def extract_season_episode(text):
     if not text:
         return None, None
-    # 1. 3x04, 3X04
     m = re.search(r'(?i)(?:^|[\s_\.\-\[\(])(\d{1,2})[xX](\d{1,3})(?:$|[\s_\.\-\]\)])', text)
     if m:
         return int(m.group(1)), int(m.group(2))
-    # 2. S01E02 or S1E2
     m2 = re.search(r'(?i)(?:^|[\s_\.\-\[\(])S(\d{1,2})[\s_\.\-]*E(\d{1,3})(?:$|[\s_\.\-\]\)])', text)
     if m2:
         return int(m2.group(1)), int(m2.group(2))
-    # 3. Temporada 1 Episodio 2
     m3 = re.search(r'(?i)\b(?:Temp(?:orada)?[\s_\.]*)(\d{1,2})[\s_\.]*(?:Cap(?:[ií]tulo)?|Ep(?:isodio)?[\s_\.]*)(\d{1,3})\b', text)
     if m3:
         return int(m3.group(1)), int(m3.group(2))
-    # 4. Cap 12 or Episodio 12 (asume temporada 1 si es numeración continua)
     m4 = re.search(r'(?i)\b(?:Cap(?:[ií]tulo)?|Ep(?:isodio)?)[\s_\.]*(\d{1,4})\b', text)
     if m4:
         return 1, int(m4.group(1))
@@ -73,13 +69,11 @@ async def audit_series(series_query: str):
         with open(MAP_FILE, 'r', encoding='utf-8') as f:
             canales = json.load(f)
 
-    target_topic = None
+    matching_topics = []
     target_channel = None
     ent_target = None
-
     q_lower = series_query.lower().strip()
 
-    # Buscar en los foros de series
     for canal in canales:
         if not canal.get('activo', True) or not canal.get('is_forum', False):
             continue
@@ -90,21 +84,22 @@ async def audit_series(series_query: str):
 
         try:
             ent = await c.get_input_entity(prod_id)
-            res = await c(GetForumTopicsRequest(peer=ent, q=series_query, offset_date=0, offset_id=0, offset_topic=0, limit=5))
+            res = await c(GetForumTopicsRequest(peer=ent, q=series_query, offset_date=0, offset_id=0, offset_topic=0, limit=10))
             if res and res.topics:
                 for t in res.topics:
+                    if t.id == 1:
+                        continue
                     t_title = t.title.lower()
                     if q_lower in t_title or t_title in q_lower:
-                        target_topic = t
+                        matching_topics.append(t)
                         target_channel = canal
                         ent_target = ent
-                        break
-            if target_topic:
+            if matching_topics:
                 break
         except Exception:
             continue
 
-    if not target_topic:
+    if not matching_topics:
         await c.disconnect()
         print(json.dumps({
             "ok": False,
@@ -112,7 +107,33 @@ async def audit_series(series_query: str):
         }, ensure_ascii=False))
         return
 
-    # Escanear todos los mensajes del tema encontrado
+    # Si hay múltiples temas coincidentes, escanearlos para determinar cuál es el principal
+    topics_scan_summary = []
+    for t in matching_topics:
+        cnt = 0
+        async for m in c.iter_messages(ent_target, reply_to=t.id, limit=150):
+            if not m.action:
+                cnt += 1
+        topics_scan_summary.append((t, cnt))
+
+    # Ordenar por número de mensajes descendente: el que tiene más mensajes es el Principal
+    topics_scan_summary.sort(key=lambda x: x[1], reverse=True)
+    target_topic = topics_scan_summary[0][0]
+    
+    duplicate_topics_info = []
+    if len(topics_scan_summary) > 1:
+        clean_pid = str(abs(target_channel["produccion_id"]))
+        if clean_pid.startswith("100") and len(clean_pid) > 10:
+            clean_pid = clean_pid[3:]
+        for dt, count in topics_scan_summary[1:]:
+            duplicate_topics_info.append({
+                "id": dt.id,
+                "title": dt.title,
+                "total_mensajes": count,
+                "link": f"https://t.me/c/{clean_pid}/{dt.id}"
+            })
+
+    # Escanear el tema principal a fondo
     episodes_by_season = defaultdict(lambda: defaultdict(list))
     total_messages = 0
 
@@ -120,7 +141,7 @@ async def audit_series(series_query: str):
         if m.action:
             continue
         total_messages += 1
-        fn = m.file.name if m.file else (m.text or "")
+        fn = m.file.name if (m.file and m.file.name) else (m.text or "")
         size_bytes = m.file.size if m.file else 0
         s, e = extract_season_episode(fn)
         if s is not None and e is not None:
@@ -134,7 +155,7 @@ async def audit_series(series_query: str):
 
     await c.disconnect()
 
-    # Análisis de huecos, multi-calidad y duplicados
+    # Análisis de temporadas, huecos y multi-calidad
     seasons_report = []
     missing_all = []
     all_multi_calidad = []
@@ -151,7 +172,6 @@ async def audit_series(series_query: str):
         min_e = min(ep_numbers) if ep_numbers else 1
         max_e = max(ep_numbers) if ep_numbers else 0
         
-        # Calcular huecos esperados
         start_e = 1 if min_e <= 1 else min_e
         expected_range = set(range(start_e, max_e + 1))
         missing_eps = sorted(expected_range - ep_set)
@@ -165,10 +185,8 @@ async def audit_series(series_query: str):
         for e in ep_numbers:
             files = sorted(eps_dict[e], key=lambda x: x["size_bytes"])
             if len(files) > 1:
-                # Comprobar si es Multi-Calidad (ej. Ligera <-> Cine)
                 f_min = files[0]
                 f_max = files[-1]
-                # Si el mayor es al menos 25% más grande que el menor, o difieren en tamaño relevante
                 is_multi = (f_max["size_bytes"] >= f_min["size_bytes"] * 1.25 and f_min["size_bytes"] > 0)
                 
                 if is_multi:
@@ -179,16 +197,12 @@ async def audit_series(series_query: str):
                     })
                     msg_ids_ligeras.append(f_min["msg_id"])
                     msg_ids_cine.append(f_max["msg_id"])
-                    
-                    # Si hay más de 2 archivos para el mismo capítulo, los intermedios son redundantes
                     if len(files) > 2:
                         for extra in files[1:-1]:
                             season_dupes.append(f"{s}x{e:02d}")
                             msg_ids_redundantes.append(extra["msg_id"])
                 else:
-                    # Mismo tamaño o muy similar -> Duplicado puro / redundante
                     season_dupes.append(f"{s}x{e:02d}")
-                    # Guardamos el primero, los demás son redundantes
                     for extra in files[1:]:
                         msg_ids_redundantes.append(extra["msg_id"])
 
@@ -220,6 +234,7 @@ async def audit_series(series_query: str):
         "canal": target_channel["nombre"],
         "link": topic_link,
         "total_mensajes": total_messages,
+        "duplicate_topics": duplicate_topics_info,
         "seasons": seasons_report,
         "missing_all": missing_all,
         "total_multi_calidad": len(all_multi_calidad),
