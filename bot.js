@@ -78,17 +78,33 @@ async function handleMessage(msg) {
     return;
   }
 
-  // Comando /novedades o preguntas sobre revisar contenido nuevo en búnkers
+  // Preguntas sobre capacidades ("qué puedes hacer", "cómo funciona", etc.)
+  const isCapabilitiesQuery = lower.includes('que puedes hacer') || 
+    lower.includes('qué puedes hacer') || 
+    lower.includes('como funciona') || 
+    lower.includes('cómo funciona') || 
+    lower.includes('que sabes hacer') || 
+    lower.includes('qué sabes hacer');
+  if (isCapabilitiesQuery) {
+    await sendHelpMessage(chatId);
+    return;
+  }
+
+  // Comando /novedades o preguntas sobre revisar contenido nuevo en búnkers / ver cambios
   const isAskingNovedades = lower === '/novedades' || 
+    lower.includes('novedad') ||
+    lower.includes('cambio') ||
     lower.includes('contenido nuevo') || 
     lower.includes('algo nuevo') || 
+    lower.includes('qué hay de nuevo') ||
+    lower.includes('que hay de nuevo') ||
     lower.includes('revisar si hay') || 
     lower.includes('revises si hay') || 
     lower.includes('revisa si hay') || 
-    lower.includes('checar si hay') ||
-    lower.includes('checa si hay') ||
-    lower.includes('hay novedades') ||
-    lower.includes('hay algo pendiente');
+    lower.includes('checar si hay') || 
+    lower.includes('checa si hay') || 
+    lower.includes('hay algo pendiente') ||
+    (lower.includes('bunker') && (lower.includes('ver') || lower.includes('hay') || lower.includes('revisa') || lower.includes('checa') || lower.includes('mira')));
 
   if (isAskingNovedades) {
     await handleCheckNovedades(chatId);
