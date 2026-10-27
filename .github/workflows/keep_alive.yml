@@ -1,0 +1,15 @@
+name: Keep-Alive DevBot 24/7
+
+on:
+  schedule:
+    - cron: '*/10 * * * *' # Cada 10 minutos
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping DevBot en Render para mantenerlo 24/7 despierto
+        run: |
+          echo "Pinging https://teveflipe-dev-bot.onrender.com/health ..."
+          curl -s --connect-timeout 25 --max-time 35 https://teveflipe-dev-bot.onrender.com/health || true

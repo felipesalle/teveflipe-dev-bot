@@ -1271,12 +1271,24 @@ async function startPolling() {
   const PORT = process.env.PORT || 8000;
   try {
     const server = http.createServer((req, res) => {
-      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('🤖 TeVeFLIPE DevBot is running 24/7 on Koyeb!\n');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok', bot: 'TeVeFLIPE DevBot 24/7', uptime: Math.round(process.uptime()) }));
     });
     server.listen(PORT, () => {
       console.log(`🌐 Health-check HTTP server escuchando en puerto ${PORT}`);
     });
+
+    // Auto Keep-Alive: Ping automático a sí mismo cada 7 minutos para que Render NUNCA se duerma
+    const appUrl = process.env.RENDER_EXTERNAL_URL || 'https://teveflipe-dev-bot.onrender.com';
+    setInterval(async () => {
+      try {
+        const ping = await fetch(`${appUrl}/health`);
+        console.log(`[Keep-Alive Ping]: status ${ping.status} at ${new Date().toLocaleTimeString()}`);
+      } catch (err) {
+        console.warn(`[Keep-Alive Ping]: ${err.message}`);
+      }
+    }, 7 * 60 * 1000);
+
   } catch (e) {
     console.warn('[HTTP Server Warning]:', e.message);
   }
