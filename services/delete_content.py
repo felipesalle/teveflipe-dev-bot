@@ -29,13 +29,13 @@ async def delete_msgs(channel_id: int, msg_ids: list):
     env = load_env()
     session_prod = (env.get('SESSION_PROD') or '').strip().strip("'").strip('"')
     session_bunker = (env.get('SESSION_BUNKER') or '').strip().strip("'").strip('"')
-    api_id = int(env.get('TELEGRAM_API_ID', 28045969))
-    api_hash = env.get('TELEGRAM_API_HASH', 'd8e515c5687943e5e0bf046f87c3d2cc')
+    api_id = int(env.get('TELEGRAM_API_ID') or env.get('API_ID') or 28045969)
+    api_hash = env.get('TELEGRAM_API_HASH') or env.get('API_HASH') or 'd8e515c5687943e5e0bf046f87c3d2cc'
 
     session_to_use = session_prod or session_bunker
     if not session_to_use or len(session_to_use) < 50:
         print(json.dumps({"ok": False, "error": "No hay sesión válida configurada"}))
-        return
+        sys.exit(1)
 
     c = TelegramClient(StringSession(session_to_use), api_id, api_hash)
     await c.connect()
@@ -66,8 +66,9 @@ async def delete_msgs(channel_id: int, msg_ids: list):
                 return
             except Exception as e2:
                 print(json.dumps({"ok": False, "error": str(e2)}))
-                return
+                sys.exit(1)
         print(json.dumps({"ok": False, "error": str(e)}))
+        sys.exit(1)
     finally:
         await c.disconnect()
 

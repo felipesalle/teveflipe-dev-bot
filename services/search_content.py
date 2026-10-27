@@ -28,6 +28,8 @@ def load_env():
                         env[k] = v.strip().strip("'").strip('"')
     return env
 
+STOP_WORDS = {"el", "la", "los", "las", "un", "una", "unos", "unas", "de", "del", "al", "y", "o", "en", "the", "a", "an", "and", "of", "in", "to"}
+
 def matches_query(raw_title: str, query: str) -> bool:
     if not raw_title:
         return False
@@ -39,9 +41,11 @@ def matches_query(raw_title: str, query: str) -> bool:
 
     # Palabras clave sin el año
     clean_q = re.sub(r'\b(19\d\d|20\d\d)\b', '', query).strip()
-    q_words = [w.lower() for w in clean_q.split() if len(w) > 1]
+    all_words = [w.lower() for w in clean_q.split() if len(w) > 1]
+    sig_words = [w for w in all_words if w not in STOP_WORDS]
+    q_words = sig_words if sig_words else all_words
 
-    # Cada palabra debe coincidir como palabra completa (evita que 'titanic' coincida con 'titanes')
+    # Cada palabra debe coincidir como palabra completa
     for w in q_words:
         if not re.search(r'\b' + re.escape(w) + r'\b', title_lower):
             return False
@@ -72,8 +76,14 @@ async def search_query(query: str):
             canales = json.load(f)
 
     results = []
-    # Término para buscar en la API de Telegram (sin el año para no limitar la búsqueda del servidor)
-    clean_keyword = re.sub(r'\b(19\d\d|20\d\d)\b', '', query).strip() or query
+    # Términos para buscar en la API de Telegram (siempre en minúsculas para evitar problemas de indexación del servidor)
+    clean_keyword = re.sub(r'\b(19\d\d|20\d\d)\b', '', query).strip().lower() or query.lower()
+    words_no_stop = [w for w in clean_keyword.split() if w not in STOP_WORDS and len(w) > 2]
+    search_terms = [clean_keyword]
+    if words_no_stop and " ".join(words_no_stop) != clean_keyword:
+        search_terms.append(" ".join(words_no_stop))
+    if len(words_no_stop) > 1:
+        search_terms.append(max(words_no_stop, key=len))
 
     for canal in canales:
         if not canal.get('activo', True):
@@ -93,66 +103,76 @@ async def search_query(query: str):
             ent = await c.get_input_entity(prod_id)
             found_items = []
             seen_topics = set()
+            seen_mids = set()
 
-            # 1. Si es foro, buscar en temas
-            if is_forum:
-                try:
-                    res_topics = await c(GetForumTopicsRequest(
-                        peer=ent, q=clean_keyword, offset_date=0, offset_id=0, offset_topic=0, limit=10
-                    ))
-                    if res_topics and res_topics.topics:
-                        for t in res_topics.topics:
-                            if not matches_query(t.title, query):
-                                continue
-                            seen_topics.add(t.id)
-                            tg_link = f"https://t.me/c/{clean_pid}/{t.id}"
-                            found_items.append({
-                                "tipo": "tema",
-                                "title": t.title,
-                                "top_id": t.id,
-                                "msg_id": t.id,
-                                "channel_id": prod_id,
-                                "link": tg_link,
-                                "date": t.date.strftime("%d/%m/%Y") if hasattr(t, 'date') and t.date else ""
-                            })
-                except Exception:
-                    pass
+            for sterm in search_terms:
+                # 1. Si es foro, buscar en temas
+                if is_forum:
+                    try:
+                        res_topics = await c(GetForumTopicsRequest(
+                            peer=ent, q=sterm, offset_date=0, offset_id=0, offset_topic=0, limit=10
+                        ))
+                        if res_topics and res_topics.topics:
+                            for t in res_topics.topics:
+                                if t.id in seen_topics or not matches_query(t.title, query):
+                                    continue
+                                seen_topics.add(t.id)
+                                tg_link = f"https://t.me/c/{clean_pid}/{t.id}"
+                                found_items.append({
+                                    "tipo": "tema",
+                                    "title": t.title,
+                                    "top_id": t.id,
+                                    "msg_id": t.id,
+                                    "channel_id": prod_id,
+                                    "link": tg_link,
+                                    "date": t.date.strftime("%d/%m/%Y") if hasattr(t, 'date') and t.date else ""
+                                })
+                    except Exception:
+                        pass
 
-            # 2. Buscar en mensajes / archivos
-            async for m in c.iter_messages(ent, search=clean_keyword, limit=15):
-                top_id = None
-                if is_forum and m.reply_to:
-                    top_id = getattr(m.reply_to, 'reply_to_top_id', None) or getattr(m.reply_to, 'reply_to_msg_id', None)
+                # 2. Buscar en mensajes / archivos
+                async for m in c.iter_messages(ent, search=sterm, limit=15):
+                    if m.id in seen_mids:
+                        continue
+                    seen_mids.add(m.id)
 
-                if is_forum and top_id and top_id in seen_topics:
-                    continue
+                    top_id = None
+                    if is_forum and m.reply_to:
+                        top_id = getattr(m.reply_to, 'reply_to_top_id', None) or getattr(m.reply_to, 'reply_to_msg_id', None)
 
-                fn = m.file.name if m.file else None
-                txt = m.text[:60] if m.text else None
-                raw_text = fn or txt or ""
+                    if is_forum and top_id and top_id in seen_topics:
+                        continue
 
-                # Filtrar con coincidencia estricta de palabra y año
-                if not matches_query(raw_text, query):
-                    continue
+                    fn = m.file.name if m.file else None
+                    txt = m.text[:60] if m.text else None
+                    raw_text = fn or txt or ""
 
-                size_str = ""
-                if m.file:
-                    sb = m.file.size
-                    size_str = f"{round(sb / (1024**3), 2)} GB" if sb >= 1024**3 else f"{round(sb / (1024**2), 1)} MB"
+                    # Filtrar con coincidencia estricta de palabra y año
+                    if not matches_query(raw_text, query):
+                        continue
 
-                link_id = top_id if (is_forum and top_id) else m.id
-                tg_link = f"https://t.me/c/{clean_pid}/{link_id}"
+                    size_str = ""
+                    if m.file:
+                        sb = m.file.size
+                        size_str = f"{round(sb / (1024**3), 2)} GB" if sb >= 1024**3 else f"{round(sb / (1024**2), 1)} MB"
 
-                found_items.append({
-                    "tipo": "archivo",
-                    "title": fn or txt or "Sin nombre",
-                    "top_id": top_id,
-                    "msg_id": m.id,
-                    "channel_id": prod_id,
-                    "size_str": size_str,
-                    "link": tg_link,
-                    "date": m.date.strftime("%d/%m/%Y")
-                })
+                    link_id = top_id if (is_forum and top_id) else m.id
+                    tg_link = f"https://t.me/c/{clean_pid}/{link_id}"
+
+                    found_items.append({
+                        "tipo": "archivo",
+                        "title": fn or txt or "Sin nombre",
+                        "top_id": top_id,
+                        "msg_id": m.id,
+                        "channel_id": prod_id,
+                        "size_str": size_str,
+                        "link": tg_link,
+                        "date": m.date.strftime("%d/%m/%Y")
+                    })
+
+                # Si ya encontramos coincidencias con el término más específico, no es necesario iterar términos más amplios
+                if found_items:
+                    break
 
             if found_items:
                 results.append({

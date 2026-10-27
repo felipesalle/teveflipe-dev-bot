@@ -737,13 +737,15 @@ async function handleSearchContent(chatId, rawText) {
       return;
     }
 
-    // Guardar versión previa detectada en Producción
+    // Guardar versión(es) previa(s) detectada(s) en Producción
     if (resultados[0].items && resultados[0].items.length > 0) {
       const fItem = resultados[0].items[0];
+      const allMids = resultados[0].items.map(it => it.msg_id).filter(Boolean);
       activePreviousVersionByChat[chatId] = {
         title: fItem.title,
         channelId: fItem.channel_id,
-        msgId: fItem.msg_id
+        msgId: fItem.msg_id,
+        msgIds: allMids
       };
     } else {
       activePreviousVersionByChat[chatId] = null;
@@ -912,9 +914,10 @@ async function handleCopyToBunker(chatId, fromCid, msgId, cType, messageId) {
     const oldVer = activePreviousVersionByChat[chatId];
     const syncButtons = [];
 
-    if (oldVer && oldVer.channelId && oldVer.msgId) {
-      successMsg += `♻️ <b>Se detectó una versión anterior en Producción:</b>\n` +
-        `• <i>${telegram.escapeHtml(oldVer.title)}</i>\n\n` +
+    if (oldVer && oldVer.channelId && (oldVer.msgIds?.length || oldVer.msgId)) {
+      const countNote = (oldVer.msgIds && oldVer.msgIds.length > 1) ? ` (se detectaron ${oldVer.msgIds.length} versiones/duplicados)` : '';
+      successMsg += `♻️ <b>Se detectó versión anterior en Producción:</b>\n` +
+        `• <i>${telegram.escapeHtml(oldVer.title)}</i>${countNote}\n\n` +
         `¿Deseas reemplazarla eliminando la anterior de Producción para evitar duplicados?`;
 
       syncButtons.push([
@@ -958,14 +961,34 @@ async function handleReplaceOld(chatId, oldCid, oldMid, messageId) {
   }
 
   try {
+    // Si tenemos en memoria todos los IDs de duplicados para este chat, eliminarlos todos
+    const oldVer = activePreviousVersionByChat[chatId];
+    let midsToDelete = oldMid ? String(oldMid) : '';
+    if (oldVer && oldVer.channelId === oldCid && Array.isArray(oldVer.msgIds) && oldVer.msgIds.length > 0) {
+      midsToDelete = oldVer.msgIds.join(',');
+    }
+
     const pythonScript = path.join(__dirname, 'services', 'delete_content.py');
-    await execPromise(`python "${pythonScript}" "${oldCid}" "${oldMid}"`);
+    const { stdout } = await execPromise(`python "${pythonScript}" "${oldCid}" "${midsToDelete}"`);
+    let res;
+    try {
+      res = JSON.parse(stdout.trim());
+    } catch {
+      // ignore
+    }
+    if (res && res.ok === false) {
+      throw new Error(res.error || 'Error al eliminar mensajes en Telegram');
+    }
+
+    // Limpiar versión previa guardada
+    activePreviousVersionByChat[chatId] = null;
 
     // Disparar sincronización para publicar la nueva versión
     await github.triggerWorkflow('sync_novedades.yml');
 
+    const deletedCount = (res && res.deleted_count) ? res.deleted_count : 1;
     const doneText = `♻️ <b>¡REEMPLAZO REALIZADO CON ÉXITO!</b>\n\n` +
-      `🗑️ La versión anterior en menor calidad ha sido eliminada de Producción para evitar duplicados.\n` +
+      `🗑️ Se eliminaron ${deletedCount} archivo(s) de menor calidad en Producción para evitar duplicados.\n` +
       `🚀 La nueva versión de mayor calidad se está sincronizando y publicando en Producción.\n\n` +
       `📊 <a href="https://github.com/${config.githubOwner}/${config.githubRepo}/actions">Monitorear en GitHub Actions</a>`;
 
@@ -976,7 +999,12 @@ async function handleReplaceOld(chatId, oldCid, oldMid, messageId) {
     }
   } catch (err) {
     console.error('Error reemplazando versión antigua:', err);
-    await telegram.sendMessage(chatId, `❌ Error en reemplazo: ${err.message}`);
+    const errText = `❌ Error en el proceso de reemplazo: ${err.message}`;
+    if (messageId) {
+      await telegram.editMessageText(chatId, messageId, errText);
+    } else {
+      await telegram.sendMessage(chatId, errText);
+    }
   }
 }
 
