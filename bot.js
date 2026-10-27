@@ -306,11 +306,22 @@ async function handleCheckNovedades(chatId) {
     report += `Se encontró contenido nuevo pendiente por sincronizar:\n\n`;
 
     novedades.forEach(n => {
-      report += `• <b>${telegram.escapeHtml(n.nombre)}</b>: ~${n.pendientes} archivos nuevos\n`;
+      const cantStr = n.pendientes === 1 ? '1 archivo nuevo' : `~${n.pendientes} archivos nuevos`;
+      report += `• <b>${telegram.escapeHtml(n.nombre)}</b>: <b>${cantStr}</b>\n`;
+      if (n.titulos && n.titulos.length > 0) {
+        const itemIcon = n.is_serie ? '📺' : '🎬';
+        n.titulos.forEach(t => {
+          report += `   ↳ ${itemIcon} <i>${telegram.escapeHtml(t)}</i>\n`;
+        });
+        if (n.mas_titulos > 0) {
+          report += `   ↳ <i>...y ${n.mas_titulos} más</i>\n`;
+        }
+      }
+      report += `\n`;
     });
 
     if (alDia.length > 0) {
-      report += `\n👌 <b>Canales al día:</b> ${alDia.map(n => n.split(' - ')[0]).join(', ')}\n`;
+      report += `👌 <b>Canales al día:</b> ${alDia.map(n => n.split(' - ')[0]).join(', ')}\n`;
     }
 
     report += `\n¿Deseas sincronizarlos a sus canales de Producción ahora?`;
