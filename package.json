@@ -1,0 +1,13 @@
+{
+  "name": "teveflipe-dev-bot",
+  "version": "1.0.0",
+  "description": "Telegram AI Developer Bot for GitHub Repositories using Gemini",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "node --watch bot.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  }
+}
