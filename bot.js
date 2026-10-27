@@ -533,26 +533,88 @@ async function handleSearchOrigin(chatId, query, messageId) {
     }
 
     let report = `💎 <b>OPCIONES ENCONTRADAS EN CANALES ORIGEN: "${telegram.escapeHtml(query)}"</b>\n\n`;
+    const copyButtons = [];
+    let optionCount = 0;
 
     resultados.forEach(r => {
       report += `📥 <b>${telegram.escapeHtml(r.canal)}</b>:\n`;
-      r.items.slice(0, 5).forEach((it, idx) => {
-        const bestTag = (idx === 0 && it.size_mb > 1000) ? ' 🌟 <i>(Mayor tamaño)</i>' : '';
-        report += `• <b>${telegram.escapeHtml(it.title)}</b>${bestTag}\n`;
-        report += `  ⚖️ Peso: <b>${it.size_str || 'N/A'}</b> | 📅 ${it.date}\n`;
-        report += `  🔗 <a href="${it.link}">Ver en Canal Origen</a>\n\n`;
+      r.items.slice(0, 3).forEach((it) => {
+        optionCount++;
+        const bestTag = (optionCount === 1 && it.size_mb > 1000) ? ' 🌟 <i>(Mayor calidad/peso)</i>' : '';
+        report += `<b>${optionCount}. ${telegram.escapeHtml(it.title)}</b>${bestTag}\n`;
+        report += `   ⚖️ Peso: <b>${it.size_str || 'N/A'}</b> | 📅 ${it.date}\n`;
+        report += `   🔗 <a href="${it.link}">Ver en Canal Origen</a>\n\n`;
+
+        copyButtons.push([
+          {
+            text: `📥 Copiar Opción ${optionCount} (${it.size_str || 'Video'}) al Búnker`,
+            callback_data: `copybunk_${it.channel_id}_${it.msg_id}_${it.content_type}`
+          }
+        ]);
       });
     });
 
+    const replyMarkup = copyButtons.length > 0 ? { inline_keyboard: copyButtons } : undefined;
+
     if (messageId) {
-      await telegram.editMessageText(chatId, messageId, report, { parse_mode: 'HTML', disable_web_page_preview: true });
+      await telegram.editMessageText(chatId, messageId, report, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: replyMarkup });
     } else {
-      await telegram.sendMessage(chatId, report, { parse_mode: 'HTML', disable_web_page_preview: true });
+      await telegram.sendMessage(chatId, report, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: replyMarkup });
     }
 
   } catch (err) {
     console.error('Error buscando en canales origen:', err);
     await telegram.sendMessage(chatId, `❌ Error consultando canales origen: ${err.message}`);
+  }
+}
+
+/**
+ * Copiar archivo desde canal origen al Búnker correspondiente
+ */
+async function handleCopyToBunker(chatId, fromCid, msgId, cType, messageId) {
+  const loading = `⏳ <b>Copiando archivo al Búnker TeVeFLIPE...</b>`;
+  if (messageId) {
+    await telegram.editMessageText(chatId, messageId, loading, { parse_mode: 'HTML' });
+  } else {
+    await telegram.sendMessage(chatId, loading, { parse_mode: 'HTML' });
+  }
+
+  try {
+    const pythonScript = path.join(__dirname, 'services', 'copy_to_bunker.py');
+    const { stdout } = await execPromise(`python "${pythonScript}" "${fromCid}" "${msgId}" "${cType}"`);
+
+    let data;
+    try {
+      data = JSON.parse(stdout.trim());
+    } catch {
+      throw new Error('No se pudo procesar la respuesta de copia al búnker.');
+    }
+
+    if (!data.ok) throw new Error(data.error || 'Error desconocido al copiar');
+
+    const successMsg = `✅ <b>¡COPIADO CON ÉXITO AL BÚNKER!</b> 📥\n\n` +
+      `📦 <b>Archivo:</b> <code>${telegram.escapeHtml(data.filename)}</code>\n` +
+      `📁 <b>Destino Búnker:</b> <b>${telegram.escapeHtml(data.bunker_name)}</b>\n\n` +
+      `¿Deseas sincronizarlo a los canales de Producción ahora?`;
+
+    const syncButtons = {
+      inline_keyboard: [
+        [
+          { text: '🚀 Sí, Sincronizar Ahora', callback_data: 'sync_now' },
+          { text: '⏳ Más tarde', callback_data: 'sync_later' }
+        ]
+      ]
+    };
+
+    if (messageId) {
+      await telegram.editMessageText(chatId, messageId, successMsg, { parse_mode: 'HTML', reply_markup: syncButtons });
+    } else {
+      await telegram.sendMessage(chatId, successMsg, { parse_mode: 'HTML', reply_markup: syncButtons });
+    }
+
+  } catch (err) {
+    console.error('Error copiando a bunker:', err);
+    await telegram.sendMessage(chatId, `❌ Error copiando al búnker: ${err.message}`);
   }
 }
 
@@ -568,6 +630,15 @@ async function handleCallbackQuery(cb) {
   if (data.startsWith('searchorig_')) {
     const rawQ = decodeURIComponent(data.replace('searchorig_', ''));
     await handleSearchOrigin(chatId, rawQ, cb.message.message_id);
+    return;
+  }
+
+  if (data.startsWith('copybunk_')) {
+    const parts = data.replace('copybunk_', '').split('_');
+    const fromCid = parseInt(parts[0], 10);
+    const msgId = parseInt(parts[1], 10);
+    const cType = parts[2] || 'pelicula';
+    await handleCopyToBunker(chatId, fromCid, msgId, cType, cb.message.message_id);
     return;
   }
 
