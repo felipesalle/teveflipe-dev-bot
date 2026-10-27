@@ -2,6 +2,10 @@ const config = require('./config');
 const telegram = require('./services/telegram');
 const github = require('./services/github');
 const gemini = require('./services/gemini');
+const { exec } = require('child_process');
+const util = require('util');
+const path = require('path');
+const execPromise = util.promisify(exec);
 
 /**
  * Manejador principal de cualquier actualización de Telegram (Webhook o Polling)
@@ -42,6 +46,23 @@ async function handleMessage(msg) {
   // Comando /start o /help
   if (lower === '/start' || lower === '/help' || lower === 'ayuda') {
     await sendHelpMessage(chatId);
+    return;
+  }
+
+  // Comando /novedades o preguntas sobre revisar contenido nuevo en búnkers
+  const isAskingNovedades = lower === '/novedades' || 
+    lower.includes('contenido nuevo') || 
+    lower.includes('algo nuevo') || 
+    lower.includes('revisar si hay') || 
+    lower.includes('revises si hay') || 
+    lower.includes('revisa si hay') || 
+    lower.includes('checar si hay') ||
+    lower.includes('checa si hay') ||
+    lower.includes('hay novedades') ||
+    lower.includes('hay algo pendiente');
+
+  if (isAskingNovedades) {
+    await handleCheckNovedades(chatId);
     return;
   }
 
@@ -249,13 +270,113 @@ async function handleDirectRun(chatId, target) {
 }
 
 /**
- * Manejo de botones de ejecución de workflows
+ * Comprobar novedades en tiempo real en los canales Búnker
+ */
+async function handleCheckNovedades(chatId) {
+  const ack = await telegram.sendMessage(chatId, '🔍 <b>Consultando los canales búnker en tiempo real...</b>', { parse_mode: 'HTML' });
+  const ackMsgId = ack?.result?.message_id;
+
+  try {
+    const pythonScript = path.join(__dirname, 'services', 'check_novedades.py');
+    const { stdout, stderr } = await execPromise(`python "${pythonScript}"`);
+    
+    let data;
+    try {
+      data = JSON.parse(stdout.trim());
+    } catch {
+      throw new Error('No se pudo interpretar el reporte de los búnkers.');
+    }
+
+    if (!data.ok) throw new Error(data.error || 'Error desconocido');
+
+    const novedades = data.novedades || [];
+    const alDia = data.al_dia || [];
+
+    if (novedades.length === 0) {
+      const allGoodText = `✅ <b>¡Todos los canales están al día!</b>\n\nNo se detectó contenido nuevo pendiente en los búnkers consultados.`;
+      if (ackMsgId) {
+        await telegram.editMessageText(chatId, ackMsgId, allGoodText, { parse_mode: 'HTML' });
+      } else {
+        await telegram.sendMessage(chatId, allGoodText, { parse_mode: 'HTML' });
+      }
+      return;
+    }
+
+    let report = `🔔 <b>REPORTE DE NOVEDADES EN BÚNKERS</b>\n\n`;
+    report += `Se encontró contenido nuevo pendiente por sincronizar:\n\n`;
+
+    novedades.forEach(n => {
+      report += `• <b>${telegram.escapeHtml(n.nombre)}</b>: ~${n.pendientes} archivos nuevos\n`;
+    });
+
+    if (alDia.length > 0) {
+      report += `\n👌 <b>Canales al día:</b> ${alDia.map(n => n.split(' - ')[0]).join(', ')}\n`;
+    }
+
+    report += `\n¿Deseas sincronizarlos a sus canales de Producción ahora?`;
+
+    const buttons = {
+      inline_keyboard: [
+        [
+          { text: '🚀 Sí, Sincronizar Ahora', callback_data: 'sync_now' },
+          { text: '⏳ Más tarde', callback_data: 'sync_later' }
+        ]
+      ]
+    };
+
+    if (ackMsgId) {
+      await telegram.editMessageText(chatId, ackMsgId, report, {
+        parse_mode: 'HTML',
+        reply_markup: buttons
+      });
+    } else {
+      await telegram.sendMessage(chatId, report, {
+        parse_mode: 'HTML',
+        reply_markup: buttons
+      });
+    }
+
+  } catch (err) {
+    console.error('Error revisando novedades:', err);
+    await telegram.sendMessage(chatId, `❌ Error consultando búnkers: ${err.message}`);
+  }
+}
+
+/**
+ * Manejo de botones de ejecución de workflows y confirmaciones
  */
 async function handleCallbackQuery(cb) {
   const chatId = cb.message.chat.id;
   const data = cb.data;
 
   await telegram.answerCallbackQuery(cb.id, 'Procesando...');
+
+  if (data === 'sync_now') {
+    try {
+      await github.triggerWorkflow('sync_novedades.yml');
+      await telegram.editMessageText(
+        chatId,
+        cb.message.message_id,
+        `🚀 <b>¡Sincronización iniciada con éxito!</b>\n\n` +
+        `El workflow <code>sync_novedades.yml</code> está procesando los búnkers en GitHub Actions.\n\n` +
+        `📊 <a href="https://github.com/${config.githubOwner}/${config.githubRepo}/actions">Monitorear en GitHub Actions</a>`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (err) {
+      await telegram.sendMessage(chatId, `❌ Error activando sincronización: ${err.message}`);
+    }
+    return;
+  }
+
+  if (data === 'sync_later') {
+    await telegram.editMessageText(
+      chatId,
+      cb.message.message_id,
+      `⏳ <b>Sincronización pospuesta.</b>\n\nNo se ha movido nada. Cuando quieras sincronizar, solo envíame /novedades o pregúntame de nuevo.`,
+      { parse_mode: 'HTML' }
+    );
+    return;
+  }
 
   if (data.startsWith('runwf_')) {
     const filename = data.replace('runwf_', '');
