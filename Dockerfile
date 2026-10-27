@@ -1,10 +1,12 @@
 FROM node:20-slim
 
-# Instalar Python3, pip y herramientas mínimas
+# Instalar Python3, pip, alias python y certificados
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
+    python-is-python3 \
     ca-certificates \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -20,7 +22,7 @@ RUN npm install --omit=dev && \
 # Copiar todo el código fuente
 COPY . .
 
-# Puerto para Koyeb / Cloud Healthcheck
+# Puerto para Koyeb / Render Healthcheck
 ENV PORT=8000
 EXPOSE 8000
 
