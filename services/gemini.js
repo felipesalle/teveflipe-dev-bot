@@ -31,6 +31,13 @@ ${CANALES_INFO}
    - Para copiar o sincronizar contenido: Se leen los mensajes del canal Búnker (usando SESSION_BUNKER o SESSION_PROD) y se envían o reenvían al canal/supergrupo correspondiente de Producción. Si es un foro/supergrupo (como Series TV o Sagas), se busca o crea el tema (topic) correspondiente antes de enviar los episodios o archivos multimedia.
    - Entorno: GitHub Actions (ubuntu-latest, Python 3.10).
    - Siempre incluye on: workflow_dispatch en los workflows .yml para activación manual inmediata.
+   - PERSISTENCIA DE ESTADO: El progreso y último ID sincronizado se lee y actualiza en 'canales_map.json' (campo 'ultimo_id_sincronizado') o en un archivo JSON local. JAMÁS pidas crear secrets manuales en GitHub para IDs.
+   - Al final de cada workflow de GitHub Actions que sincronice contenido, incluye un paso para hacer commit automático del JSON de estado:
+     git config --global user.name 'github-actions[bot]'
+     git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+     git add canales_map.json || true
+     git commit -m 'auto: actualizar ultimo_id [skip ci]' || true
+     git push || true
 
 Reglas de salida:
 - DEBES responder ÚNICAMENTE con un objeto JSON válido con la siguiente estructura:
