@@ -76,6 +76,8 @@ async def search_query(query: str):
                                 "tipo": "tema",
                                 "title": t.title,
                                 "top_id": t.id,
+                                "msg_id": t.id,
+                                "channel_id": prod_id,
                                 "link": tg_link,
                                 "date": t.date.strftime("%d/%m/%Y") if hasattr(t, 'date') and t.date else ""
                             })
@@ -101,6 +103,8 @@ async def search_query(query: str):
                     "tipo": "archivo",
                     "title": fn or txt or "Sin nombre",
                     "top_id": top_id,
+                    "msg_id": m.id,
+                    "channel_id": prod_id,
                     "link": tg_link,
                     "date": m.date.strftime("%d/%m/%Y")
                 })

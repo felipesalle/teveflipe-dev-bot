@@ -7,6 +7,9 @@ const util = require('util');
 const path = require('path');
 const execPromise = util.promisify(exec);
 
+// Estado en memoria para rastrear versiones anteriores encontradas en búsquedas
+let activePreviousVersionByChat = {};
+
 /**
  * Manejador principal de cualquier actualización de Telegram (Webhook o Polling)
  */
@@ -444,6 +447,7 @@ async function handleSearchContent(chatId, rawText) {
 
     const resultados = data.resultados || [];
     if (resultados.length === 0) {
+      activePreviousVersionByChat[chatId] = null;
       const notFoundText = `❌ No se encontró ningún resultado para "<b>${telegram.escapeHtml(targetQuery)}</b>" en los canales de Producción.`;
       const originBtn = {
         inline_keyboard: [
@@ -458,6 +462,18 @@ async function handleSearchContent(chatId, rawText) {
         await telegram.sendMessage(chatId, notFoundText, { parse_mode: 'HTML', reply_markup: originBtn });
       }
       return;
+    }
+
+    // Guardar versión previa detectada en Producción
+    if (resultados[0].items && resultados[0].items.length > 0) {
+      const fItem = resultados[0].items[0];
+      activePreviousVersionByChat[chatId] = {
+        title: fItem.title,
+        channelId: fItem.channel_id,
+        msgId: fItem.msg_id
+      };
+    } else {
+      activePreviousVersionByChat[chatId] = null;
     }
 
     let report = `🔎 <b>RESULTADOS PARA: "${telegram.escapeHtml(targetQuery)}"</b>\n\n`;
@@ -592,29 +608,78 @@ async function handleCopyToBunker(chatId, fromCid, msgId, cType, messageId) {
 
     if (!data.ok) throw new Error(data.error || 'Error desconocido al copiar');
 
-    const successMsg = `✅ <b>¡COPIADO CON ÉXITO AL BÚNKER!</b> 📥\n\n` +
-      `📦 <b>Archivo:</b> <code>${telegram.escapeHtml(data.filename)}</code>\n` +
-      `📁 <b>Destino Búnker:</b> <b>${telegram.escapeHtml(data.bunker_name)}</b>\n\n` +
-      `¿Deseas sincronizarlo a los canales de Producción ahora?`;
+    let successMsg = `✅ <b>¡COPIADO CON ÉXITO AL BÚNKER!</b> 📥\n\n` +
+      `📦 <b>Nuevo Archivo:</b> <code>${telegram.escapeHtml(data.filename)}</code>\n` +
+      `📁 <b>Destino Búnker:</b> <b>${telegram.escapeHtml(data.bunker_name)}</b>\n\n`;
 
-    const syncButtons = {
-      inline_keyboard: [
-        [
-          { text: '🚀 Sí, Sincronizar Ahora', callback_data: 'sync_now' },
-          { text: '⏳ Más tarde', callback_data: 'sync_later' }
-        ]
-      ]
-    };
+    const oldVer = activePreviousVersionByChat[chatId];
+    const syncButtons = [];
+
+    if (oldVer && oldVer.channelId && oldVer.msgId) {
+      successMsg += `♻️ <b>Se detectó una versión anterior en Producción:</b>\n` +
+        `• <i>${telegram.escapeHtml(oldVer.title)}</i>\n\n` +
+        `¿Deseas reemplazarla eliminando la anterior de Producción para evitar duplicados?`;
+
+      syncButtons.push([
+        { text: '🗑️ Reemplazar y Borrar Antigua', callback_data: `replaceold_${oldVer.channelId}_${oldVer.msgId}` }
+      ]);
+      syncButtons.push([
+        { text: '🚀 Conservar Ambas y Sincronizar', callback_data: 'sync_now' }
+      ]);
+      syncButtons.push([
+        { text: '⏳ Más tarde', callback_data: 'sync_later' }
+      ]);
+    } else {
+      successMsg += `¿Deseas sincronizarlo a los canales de Producción ahora?`;
+      syncButtons.push([
+        { text: '🚀 Sí, Sincronizar Ahora', callback_data: 'sync_now' },
+        { text: '⏳ Más tarde', callback_data: 'sync_later' }
+      ]);
+    }
+
+    const replyMarkup = { inline_keyboard: syncButtons };
 
     if (messageId) {
-      await telegram.editMessageText(chatId, messageId, successMsg, { parse_mode: 'HTML', reply_markup: syncButtons });
+      await telegram.editMessageText(chatId, messageId, successMsg, { parse_mode: 'HTML', reply_markup: replyMarkup });
     } else {
-      await telegram.sendMessage(chatId, successMsg, { parse_mode: 'HTML', reply_markup: syncButtons });
+      await telegram.sendMessage(chatId, successMsg, { parse_mode: 'HTML', reply_markup: replyMarkup });
     }
 
   } catch (err) {
     console.error('Error copiando a bunker:', err);
     await telegram.sendMessage(chatId, `❌ Error copiando al búnker: ${err.message}`);
+  }
+}
+
+/**
+ * Reemplazar versión antigua (eliminar de Producción y disparar sincronización)
+ */
+async function handleReplaceOld(chatId, oldCid, oldMid, messageId) {
+  const loading = `♻️ <b>Eliminando versión anterior de Producción y lanzando sincronización...</b>`;
+  if (messageId) {
+    await telegram.editMessageText(chatId, messageId, loading, { parse_mode: 'HTML' });
+  }
+
+  try {
+    const pythonScript = path.join(__dirname, 'services', 'delete_content.py');
+    await execPromise(`python "${pythonScript}" "${oldCid}" "${oldMid}"`);
+
+    // Disparar sincronización para publicar la nueva versión
+    await github.triggerWorkflow('sync_novedades.yml');
+
+    const doneText = `♻️ <b>¡REEMPLAZO REALIZADO CON ÉXITO!</b>\n\n` +
+      `🗑️ La versión anterior en menor calidad ha sido eliminada de Producción para evitar duplicados.\n` +
+      `🚀 La nueva versión de mayor calidad se está sincronizando y publicando en Producción.\n\n` +
+      `📊 <a href="https://github.com/${config.githubOwner}/${config.githubRepo}/actions">Monitorear en GitHub Actions</a>`;
+
+    if (messageId) {
+      await telegram.editMessageText(chatId, messageId, doneText, { parse_mode: 'HTML' });
+    } else {
+      await telegram.sendMessage(chatId, doneText, { parse_mode: 'HTML' });
+    }
+  } catch (err) {
+    console.error('Error reemplazando versión antigua:', err);
+    await telegram.sendMessage(chatId, `❌ Error en reemplazo: ${err.message}`);
   }
 }
 
@@ -630,6 +695,14 @@ async function handleCallbackQuery(cb) {
   if (data.startsWith('searchorig_')) {
     const rawQ = decodeURIComponent(data.replace('searchorig_', ''));
     await handleSearchOrigin(chatId, rawQ, cb.message.message_id);
+    return;
+  }
+
+  if (data.startsWith('replaceold_')) {
+    const parts = data.replace('replaceold_', '').split('_');
+    const oldCid = parseInt(parts[0], 10);
+    const oldMid = parseInt(parts[1], 10);
+    await handleReplaceOld(chatId, oldCid, oldMid, cb.message.message_id);
     return;
   }
 
