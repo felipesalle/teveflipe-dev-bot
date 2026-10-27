@@ -262,8 +262,23 @@ async function handleGeminiInstruction(chatId, promptText) {
     // 2. Llamada a Gemini
     const geminiRes = await gemini.generateCodeAndWorkflow(promptText);
 
-    if (!geminiRes.files || geminiRes.files.length === 0) {
-      throw new Error('Gemini no generó ningún archivo de código para esta solicitud.');
+    // Si fue una pregunta, saludo o conversación sin solicitud de código
+    if (geminiRes.is_question_or_chat || !geminiRes.files || geminiRes.files.length === 0) {
+      if (ackMsgId) {
+        await telegram.editMessageText(
+          chatId,
+          ackMsgId,
+          `🤖 <b>Flipe DevBot:</b>\n\n${telegram.escapeHtml(geminiRes.summary || '¿En qué puedo ayudarte hoy? Dime qué script o workflow necesitas que programe.')}`,
+          { parse_mode: 'HTML' }
+        );
+      } else {
+        await telegram.sendMessage(
+          chatId,
+          `🤖 <b>Flipe DevBot:</b>\n\n${telegram.escapeHtml(geminiRes.summary || '¿En qué puedo ayudarte hoy? Dime qué script o workflow necesitas que programe.')}`,
+          { parse_mode: 'HTML' }
+        );
+      }
+      return;
     }
 
     // Actualizar estado en Telegram

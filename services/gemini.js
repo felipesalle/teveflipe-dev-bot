@@ -21,7 +21,8 @@ Contexto del Repositorio 'teveflipe-bot-sync':
 Reglas de salida:
 - DEBES responder ÚNICAMENTE con un objeto JSON válido con la siguiente estructura:
 {
-  "summary": "Breve explicación en español de qué hace el código generado y cómo funciona.",
+  "summary": "Explicación o respuesta en español para Felipe.",
+  "is_question_or_chat": false,
   "files": [
     {
       "path": "nombre_del_script.py",
@@ -39,7 +40,8 @@ Reglas de salida:
 }
 
 Importante:
-- 'trigger_workflow': Especifica solo el nombre del archivo .yml (ej. 'filtrar_avatar.yml') si debe ejecutarse inmediatamente en GitHub Actions. Si no requiere ejecución inmediata, déjalo en null.
+- Si el mensaje de Felipe es un saludo ("hola", "buenas"), una pregunta o duda sobre cómo funciona el bot o el código, pon 'is_question_or_chat': true, deja 'files': [] y responde amablemente en 'summary'.
+- Si Felipe te pide programar, modificar, crear scripts o workflows, pon 'is_question_or_chat': false, llena 'files' con el código completo, define un 'commit_message' y pon en 'trigger_workflow' el archivo .yml si debe ejecutarse.
 - Todo el código debe ser completo, sintácticamente válido y funcional. No uses marcadores de posición tipo 'TODO' o '... código aquí ...'.
 `;
 
