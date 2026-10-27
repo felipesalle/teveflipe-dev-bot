@@ -18,14 +18,15 @@ ORIGIN_CHANNELS = [
 ]
 
 def load_env():
-    env = {}
+    env = dict(os.environ)
     if os.path.exists(ENV_FILE):
         with open(ENV_FILE, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith('#') and '=' in line:
                     k, v = line.split('=', 1)
-                    env[k.strip()] = v.strip()
+                    if k.strip() not in env:
+                        env[k.strip()] = v.strip()
     return env
 
 def matches_query(raw_title: str, query: str) -> bool:
