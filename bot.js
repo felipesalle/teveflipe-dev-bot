@@ -66,6 +66,15 @@ async function handleMessage(msg) {
     return;
   }
 
+  // Comando /buscar <título> o preguntas de búsqueda
+  if (lower.startsWith('/buscar ') || lower.startsWith('buscar ') || lower.startsWith('dónde está ') || lower.startsWith('donde esta ') || lower.startsWith('tenemos ')) {
+    const q = text.replace(/^(\/buscar|buscar|dónde está|donde esta|tenemos)\s+/i, '').replace(/[?¿]/g, '').trim();
+    if (q) {
+      await handleSearchContent(chatId, q);
+      return;
+    }
+  }
+
   // Comando /canales o /bunkers
   if (lower === '/canales' || lower === '/bunkers' || lower === 'canales') {
     await sendCanalesMessage(chatId);
@@ -139,9 +148,11 @@ Solo escríbeme en lenguaje natural lo que deseas programar o crear.
 • <code>"Crea un script para verificar si faltan capítulos de series retro y añade un workflow con dispatch."</code>
 
 ⚡ <b>Comandos disponibles:</b>
+• /novedades - Escanear si hay contenido nuevo en los búnkers con títulos y sincronización.
+• /buscar &lt;título&gt; - Buscar películas o series en Producción y obtener enlace directo.
 • /canales - Ver el mapa de los 15 canales Búnker y Producción de TeVeFLIPE.
 • /workflows - Ver y disparar workflows de GitHub Actions.
-• /status - Ver el estado de las últimas 5 ejecuciones en GitHub Actions.
+• /status - Ver el estado de las últimas ejecuciones en GitHub Actions.
 • /run &lt;nombre&gt; - Ejecutar un workflow directamente.
 • /lastcommit - Ver el último commit del repositorio.`;
 
@@ -350,6 +361,62 @@ async function handleCheckNovedades(chatId) {
   } catch (err) {
     console.error('Error revisando novedades:', err);
     await telegram.sendMessage(chatId, `❌ Error consultando búnkers: ${err.message}`);
+  }
+}
+
+/**
+ * Buscar contenido en canales de Producción
+ */
+async function handleSearchContent(chatId, query) {
+  const ack = await telegram.sendMessage(chatId, `🔍 <b>Buscando "<code>${telegram.escapeHtml(query)}</code>" en Producción...</b>`, { parse_mode: 'HTML' });
+  const ackMsgId = ack?.result?.message_id;
+
+  try {
+    const pythonScript = path.join(__dirname, 'services', 'search_content.py');
+    // Escapar comillas dobles para la terminal
+    const safeQuery = query.replace(/"/g, '\\"');
+    const { stdout } = await execPromise(`python "${pythonScript}" "${safeQuery}"`);
+
+    let data;
+    try {
+      data = JSON.parse(stdout.trim());
+    } catch {
+      throw new Error('No se pudo procesar la respuesta de búsqueda.');
+    }
+
+    if (!data.ok) throw new Error(data.error || 'Error desconocido');
+
+    const resultados = data.resultados || [];
+    if (resultados.length === 0) {
+      const notFoundText = `❌ No se encontró ningún resultado para "<b>${telegram.escapeHtml(query)}</b>" en los canales de Producción.`;
+      if (ackMsgId) {
+        await telegram.editMessageText(chatId, ackMsgId, notFoundText, { parse_mode: 'HTML' });
+      } else {
+        await telegram.sendMessage(chatId, notFoundText, { parse_mode: 'HTML' });
+      }
+      return;
+    }
+
+    let report = `🔎 <b>RESULTADOS PARA: "${telegram.escapeHtml(query)}"</b>\n\n`;
+
+    resultados.forEach(r => {
+      report += `📂 <b>${telegram.escapeHtml(r.canal)}</b> (${r.coincidencias} coincidencias):\n`;
+      r.items.slice(0, 4).forEach(it => {
+        report += `• <b>${telegram.escapeHtml(it.file_name)}</b>\n`;
+        report += `  📅 ${it.date} | 🔗 <a href="${it.link}">Abrir en Telegram</a>\n`;
+      });
+      report += `\n`;
+    });
+
+    if (ackMsgId) {
+      await telegram.editMessageText(chatId, ackMsgId, report, { parse_mode: 'HTML', disable_web_page_preview: true });
+    } else {
+      await telegram.sendMessage(chatId, report, { parse_mode: 'HTML', disable_web_page_preview: true });
+    }
+
+  } catch (err) {
+    console.error('Error buscando contenido:', err);
+    await telegram.sendMessage(chatId, `❌ Error en búsqueda: ${err.message}`);
   }
 }
 
