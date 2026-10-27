@@ -36,7 +36,19 @@ async def check():
     await c.connect()
 
     canales = []
-    if os.path.exists(MAP_FILE):
+    # Intentar obtener la versión más reciente directamente desde GitHub (teveflipe-bot-sync)
+    try:
+        import urllib.request
+        url = "https://raw.githubusercontent.com/felipesalle/teveflipe-bot-sync/main/canales_map.json"
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            if resp.status == 200:
+                canales = json.loads(resp.read().decode('utf-8'))
+                with open(MAP_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(canales, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+    if not canales and os.path.exists(MAP_FILE):
         with open(MAP_FILE, 'r', encoding='utf-8') as f:
             canales = json.load(f)
 
