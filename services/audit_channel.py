@@ -17,15 +17,18 @@ MAP_FILE = os.path.join(BASE_DIR, 'canales_map.json')
 CACHE_FILE = os.path.join(BASE_DIR, 'audit_channel_latest.json')
 
 def load_env():
-    env = dict(os.environ)
+    env = {}
+    for k, v in os.environ.items():
+        env[k] = v.strip().strip("'").strip('"')
     if os.path.exists(ENV_FILE):
         with open(ENV_FILE, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith('#') and '=' in line:
                     k, v = line.split('=', 1)
-                    if k.strip() not in env:
-                        env[k.strip()] = v.strip()
+                    k = k.strip()
+                    if k not in env:
+                        env[k] = v.strip().strip("'").strip('"')
     return env
 
 def extract_season_episode(text):
@@ -53,12 +56,12 @@ def normalize_title(title: str) -> str:
 async def audit_channel(channel_id_or_key: str = 'series_tv', max_topics: int = 50):
     t0 = time.time()
     env = load_env()
-    session_prod = env.get('SESSION_PROD')
+    session_prod = (env.get('SESSION_PROD') or '').strip().strip("'").strip('"')
     api_id = int(env.get('TELEGRAM_API_ID', 28045969))
     api_hash = env.get('TELEGRAM_API_HASH', 'd8e515c5687943e5e0bf046f87c3d2cc')
 
-    if not session_prod:
-        print(json.dumps({"ok": False, "error": "SESSION_PROD no encontrada"}))
+    if not session_prod or len(session_prod) < 50:
+        print(json.dumps({"ok": False, "error": f"SESSION_PROD no es válida (valor actual: '{session_prod[:20]}...', longitud: {len(session_prod)}). Debe ser la StringSession completa de ~350 caracteres configurada en Render."}))
         return
 
     canales = []

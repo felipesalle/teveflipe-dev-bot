@@ -17,15 +17,18 @@ BUNKER_PELICULAS = -1002146236969  # REPOSITORIO DE PELÍCULAS
 BUNKER_SERIES = -1002097175258      # SERIES TV
 
 def load_env():
-    env = dict(os.environ)
+    env = {}
+    for k, v in os.environ.items():
+        env[k] = v.strip().strip("'").strip('"')
     if os.path.exists(ENV_FILE):
         with open(ENV_FILE, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith('#') and '=' in line:
                     k, v = line.split('=', 1)
-                    if k.strip() not in env:
-                        env[k.strip()] = v.strip()
+                    k = k.strip()
+                    if k not in env:
+                        env[k] = v.strip().strip("'").strip('"')
     return env
 
 def extract_series_title(filename: str) -> str:
@@ -40,12 +43,12 @@ def extract_series_title(filename: str) -> str:
 
 async def copy_to_bunker(from_channel_id: int, msg_id: int, content_type: str = "pelicula", custom_title: str = None):
     env = load_env()
-    session_bunker = env.get('SESSION_BUNKER')
+    session_bunker = (env.get('SESSION_BUNKER') or '').strip().strip("'").strip('"')
     api_id = int(env.get('TELEGRAM_API_ID', 28045969))
     api_hash = env.get('TELEGRAM_API_HASH', 'd8e515c5687943e5e0bf046f87c3d2cc')
 
-    if not session_bunker:
-        print(json.dumps({"ok": False, "error": "SESSION_BUNKER no configurada"}))
+    if not session_bunker or len(session_bunker) < 50:
+        print(json.dumps({"ok": False, "error": f"SESSION_BUNKER no es válida (valor actual: '{session_bunker[:20]}...', longitud: {len(session_bunker)}). Debe ser la StringSession completa de ~350 caracteres configurada en Render."}))
         return
 
     c = TelegramClient(StringSession(session_bunker), api_id, api_hash)

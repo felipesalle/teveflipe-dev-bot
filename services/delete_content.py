@@ -11,27 +11,30 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_FILE = os.path.join(BASE_DIR, '.env')
 
 def load_env():
-    env = dict(os.environ)
+    env = {}
+    for k, v in os.environ.items():
+        env[k] = v.strip().strip("'").strip('"')
     if os.path.exists(ENV_FILE):
         with open(ENV_FILE, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith('#') and '=' in line:
                     k, v = line.split('=', 1)
-                    if k.strip() not in env:
-                        env[k.strip()] = v.strip()
+                    k = k.strip()
+                    if k not in env:
+                        env[k] = v.strip().strip("'").strip('"')
     return env
 
 async def delete_msgs(channel_id: int, msg_ids: list):
     env = load_env()
-    session_prod = env.get('SESSION_PROD')
-    session_bunker = env.get('SESSION_BUNKER')
+    session_prod = (env.get('SESSION_PROD') or '').strip().strip("'").strip('"')
+    session_bunker = (env.get('SESSION_BUNKER') or '').strip().strip("'").strip('"')
     api_id = int(env.get('TELEGRAM_API_ID', 28045969))
     api_hash = env.get('TELEGRAM_API_HASH', 'd8e515c5687943e5e0bf046f87c3d2cc')
 
     session_to_use = session_prod or session_bunker
-    if not session_to_use:
-        print(json.dumps({"ok": False, "error": "No hay sesión configurada"}))
+    if not session_to_use or len(session_to_use) < 50:
+        print(json.dumps({"ok": False, "error": "No hay sesión válida configurada"}))
         return
 
     c = TelegramClient(StringSession(session_to_use), api_id, api_hash)
