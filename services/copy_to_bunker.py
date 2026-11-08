@@ -7,6 +7,7 @@ import asyncio
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.tl.functions.messages import ForwardMessagesRequest, GetForumTopicsRequest, CreateForumTopicRequest
+from telegram_session_helper import get_connected_client
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -43,16 +44,11 @@ def extract_series_title(filename: str) -> str:
 
 async def copy_to_bunker(from_channel_id: int, msg_id: int, content_type: str = "pelicula", custom_title: str = None):
     env = load_env()
-    session_bunker = (env.get('SESSION_BUNKER') or '').strip().strip("'").strip('"')
-    api_id = int(env.get('TELEGRAM_API_ID', 28045969))
-    api_hash = env.get('TELEGRAM_API_HASH', 'd8e515c5687943e5e0bf046f87c3d2cc')
-
-    if not session_bunker or len(session_bunker) < 50:
-        print(json.dumps({"ok": False, "error": f"SESSION_BUNKER no es válida (valor actual: '{session_bunker[:20]}...', longitud: {len(session_bunker)}). Debe ser la StringSession completa de ~350 caracteres configurada en Render."}))
+    try:
+        c = await get_connected_client(env, preferred_order=('SESSION_BUNKER', 'SESSION_PROD'))
+    except Exception as e:
+        print(json.dumps({"ok": False, "error": f"Error conectando a Telegram: {e}"}))
         return
-
-    c = TelegramClient(StringSession(session_bunker), api_id, api_hash)
-    await c.connect()
 
     try:
         ent_from = await c.get_input_entity(from_channel_id)

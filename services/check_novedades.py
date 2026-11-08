@@ -5,6 +5,7 @@ import re
 import asyncio
 from telethon import TelegramClient
 from telethon.sessions import StringSession
+from telegram_session_helper import get_connected_client
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -45,16 +46,11 @@ def clean_series_title(fn, txt):
 
 async def check():
     env = load_env()
-    session_prod = (env.get('SESSION_PROD') or '').strip().strip("'").strip('"')
-    api_id = int(env.get('TELEGRAM_API_ID', 28045969))
-    api_hash = env.get('TELEGRAM_API_HASH', 'd8e515c5687943e5e0bf046f87c3d2cc')
-
-    if not session_prod or len(session_prod) < 50:
-        print(json.dumps({"error": f"SESSION_PROD no es válida (longitud: {len(session_prod)})"}))
+    try:
+        c = await get_connected_client(env, preferred_order=('SESSION_BUNKER', 'SESSION_PROD'))
+    except Exception as e:
+        print(json.dumps({"error": f"Error conectando a Telegram: {e}"}))
         return
-
-    c = TelegramClient(StringSession(session_prod), api_id, api_hash)
-    await c.connect()
 
     canales = []
     # Intentar obtener la versión más reciente directamente desde GitHub (teveflipe-bot-sync)

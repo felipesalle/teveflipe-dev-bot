@@ -7,6 +7,7 @@ from collections import defaultdict
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.tl.functions.messages import GetForumTopicsRequest
+from telegram_session_helper import get_connected_client
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -57,13 +58,11 @@ def extract_season_episode(text):
 
 async def audit_series(series_query: str):
     env = load_env()
-    session_prod = (env.get('SESSION_PROD') or '').strip().strip("'").strip('"')
-    if not session_prod or len(session_prod) < 50:
-        print(json.dumps({"ok": False, "error": f"SESSION_PROD no es válida (valor actual: '{session_prod[:20]}...', longitud: {len(session_prod)}). Debe ser la StringSession completa de ~350 caracteres configurada en Render."}))
+    try:
+        c = await get_connected_client(env, preferred_order=('SESSION_PROD', 'SESSION_BUNKER'))
+    except Exception as e:
+        print(json.dumps({"ok": False, "error": f"Error conectando a Telegram: {e}"}))
         return
-
-    c = TelegramClient(StringSession(session_prod), api_id, api_hash)
-    await c.connect()
 
     canales = []
     if os.path.exists(MAP_FILE):

@@ -6,6 +6,7 @@ import asyncio
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.tl.functions.messages import GetForumTopicsRequest
+from telegram_session_helper import get_connected_client
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -58,17 +59,11 @@ def matches_query(raw_title: str, query: str) -> bool:
 
 async def search_query(query: str):
     env = load_env()
-    session_prod = env.get('SESSION_PROD')
-    api_id = int(env.get('TELEGRAM_API_ID', 28045969))
-    api_hash = env.get('TELEGRAM_API_HASH', 'd8e515c5687943e5e0bf046f87c3d2cc')
-
-    session_prod = (env.get('SESSION_PROD') or '').strip().strip("'").strip('"')
-    if not session_prod or len(session_prod) < 50:
-        print(json.dumps({"ok": False, "error": f"SESSION_PROD no es válida (valor actual: '{session_prod[:20]}...', longitud: {len(session_prod)}). Debe ser la StringSession completa de ~350 caracteres configurada en Render."}))
+    try:
+        c = await get_connected_client(env, preferred_order=('SESSION_BUNKER', 'SESSION_PROD'))
+    except Exception as e:
+        print(json.dumps({"ok": False, "error": f"Error de conexión a Telegram ({type(e).__name__}): {e}"}))
         return
-
-    c = TelegramClient(StringSession(session_prod), api_id, api_hash)
-    await c.connect()
 
     canales = []
     if os.path.exists(MAP_FILE):
