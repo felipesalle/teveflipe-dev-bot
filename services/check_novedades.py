@@ -56,8 +56,9 @@ async def check():
     # Intentar obtener la versión más reciente directamente desde GitHub (teveflipe-bot-sync)
     try:
         import urllib.request
-        url = "https://raw.githubusercontent.com/felipesalle/teveflipe-bot-sync/main/canales_map.json"
-        with urllib.request.urlopen(url, timeout=5) as resp:
+        api_url = "https://api.github.com/repos/felipesalle/teveflipe-bot-sync/contents/canales_map.json"
+        req = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/vnd.github.v3.raw'})
+        with urllib.request.urlopen(req, timeout=5) as resp:
             if resp.status == 200:
                 canales = json.loads(resp.read().decode('utf-8'))
                 with open(MAP_FILE, 'w', encoding='utf-8') as f:
