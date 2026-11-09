@@ -139,7 +139,13 @@ async def check():
                 except Exception:
                     pass
 
-                pendientes_final = actual_file_count if (actual_file_count > 0 and diff <= 30) else diff
+                if topic_id:
+                    pendientes_final = actual_file_count
+                    if actual_file_count == 0:
+                        al_dia.append(c_name)
+                        continue
+                else:
+                    pendientes_final = actual_file_count if (actual_file_count > 0 and diff <= 30) else diff
 
                 novedades.append({
                     "id": item["id"],
