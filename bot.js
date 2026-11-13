@@ -48,9 +48,26 @@ async function handleMessage(msg) {
 
   const lower = text.toLowerCase();
 
-  // Comando /start o /help
-  if (lower === '/start' || lower === '/help' || lower === 'ayuda') {
+  // Comando /start o /help o /menu
+  if (lower === '/start' || lower === '/help' || lower === '/menu' || lower === 'ayuda') {
     await sendHelpMessage(chatId);
+    return;
+  }
+
+  // Comando /sincronizar o /sync
+  if (lower === '/sincronizar' || lower === '/sync' || lower === 'sincronizar' || lower === 'sincroniza') {
+    try {
+      await github.triggerWorkflow('sync_novedades.yml');
+      await telegram.sendMessage(
+        chatId,
+        `🚀 <b>¡Sincronización lanzada con éxito!</b>\n\n` +
+        `El workflow maestro <code>sync_novedades.yml</code> está procesando los 15 canales en GitHub Actions.\n\n` +
+        `📊 <a href="https://github.com/${config.githubOwner}/${config.githubRepo}/actions">Monitorear en GitHub Actions</a>`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (err) {
+      await telegram.sendMessage(chatId, `❌ Error: ${err.message}`);
+    }
     return;
   }
 
@@ -271,7 +288,23 @@ Solo escríbeme en lenguaje natural lo que deseas programar o crear.
 • /run &lt;nombre&gt; - Ejecutar un workflow directamente.
 • /lastcommit - Ver el último commit del repositorio.`;
 
-  await telegram.sendMessage(chatId, helpText, { parse_mode: 'HTML' });
+  const keyboard = {
+    inline_keyboard: [
+      [
+        { text: '🔍 Escanear Búnkers', callback_data: 'btn_escanear' },
+        { text: '🚀 Sincronizar Todo', callback_data: 'btn_sincronizar' }
+      ],
+      [
+        { text: '📦 Actualizar Inventario', callback_data: 'btn_inventario' },
+        { text: '📊 Estado Canales', callback_data: 'btn_canales' }
+      ],
+      [
+        { text: '⚡ Ver Workflows GitHub', callback_data: 'btn_workflows' }
+      ]
+    ]
+  };
+
+  await telegram.sendMessage(chatId, helpText, { parse_mode: 'HTML', reply_markup: keyboard });
 }
 
 /**
@@ -1032,6 +1065,52 @@ async function handleCallbackQuery(cb) {
   const data = cb.data;
 
   await telegram.answerCallbackQuery(cb.id, 'Procesando...');
+
+  if (data === 'btn_escanear') {
+    await handleCheckNovedades(chatId);
+    return;
+  }
+
+  if (data === 'btn_sincronizar') {
+    try {
+      await github.triggerWorkflow('sync_novedades.yml');
+      await telegram.sendMessage(
+        chatId,
+        `🚀 <b>¡Sincronización lanzada con éxito!</b>\n\n` +
+        `El workflow <code>sync_novedades.yml</code> está procesando los 15 canales con Relay Universal en GitHub Actions.\n\n` +
+        `📊 <a href="https://github.com/${config.githubOwner}/${config.githubRepo}/actions">Monitorear en GitHub Actions</a>`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (err) {
+      await telegram.sendMessage(chatId, `❌ Error activando sincronización: ${err.message}`);
+    }
+    return;
+  }
+
+  if (data === 'btn_inventario') {
+    try {
+      await github.triggerWorkflow('actualizar_inventario.yml');
+      await telegram.sendMessage(
+        chatId,
+        `📦 <b>¡Actualización de inventario lanzada!</b>\n\n` +
+        `El workflow <code>actualizar_inventario.yml</code> está indexando el catálogo de Producción en GitHub Actions.`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (err) {
+      await telegram.sendMessage(chatId, `❌ Error: ${err.message}`);
+    }
+    return;
+  }
+
+  if (data === 'btn_canales') {
+    await handleListCanales(chatId);
+    return;
+  }
+
+  if (data === 'btn_workflows') {
+    await sendWorkflowsMenu(chatId);
+    return;
+  }
 
   if (data.startsWith('searchorig_')) {
     const rawQ = decodeURIComponent(data.replace('searchorig_', ''));

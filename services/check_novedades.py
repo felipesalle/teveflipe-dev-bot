@@ -53,17 +53,17 @@ async def check():
         return
 
     canales = []
-    # Intentar obtener la versión más reciente directamente desde GitHub (teveflipe-bot-sync)
+    # Obtener la versión maestra y en tiempo real directamente desde GitHub CDN (sin límite de API)
     try:
         import urllib.request
-        api_url = "https://api.github.com/repos/felipesalle/teveflipe-bot-sync/contents/canales_map.json"
-        req = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/vnd.github.v3.raw'})
+        api_url = "https://raw.githubusercontent.com/felipesalle/teveflipe-bot-sync/main/canales_map.json"
+        req = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=5) as resp:
             if resp.status == 200:
                 canales = json.loads(resp.read().decode('utf-8'))
                 with open(MAP_FILE, 'w', encoding='utf-8') as f:
                     json.dump(canales, f, ensure_ascii=False, indent=2)
-    except Exception:
+    except Exception as ge:
         pass
 
     if not canales and os.path.exists(MAP_FILE):

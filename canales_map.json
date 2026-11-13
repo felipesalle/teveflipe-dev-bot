@@ -8,7 +8,7 @@
     "invite_link": "https://t.me/+VpmsvyK63OplZGIx",
     "categoria": "peliculas",
     "is_forum": false,
-    "ultimo_id_sincronizado": 2047,
+    "ultimo_id_sincronizado": 2080,
     "activo": true
   },
   {
@@ -20,7 +20,7 @@
     "invite_link": "https://t.me/+HaVzd5DeADAxMGE5",
     "categoria": "series",
     "is_forum": true,
-    "ultimo_id_sincronizado": 30012,
+    "ultimo_id_sincronizado": 30321,
     "activo": true
   },
   {
@@ -45,7 +45,7 @@
     "invite_link": "https://t.me/+odH9vFdVUtMzOWNh",
     "categoria": "clasicos",
     "is_forum": false,
-    "ultimo_id_sincronizado": 1144,
+    "ultimo_id_sincronizado": 1145,
     "activo": true
   },
   {
@@ -57,7 +57,7 @@
     "invite_link": "https://t.me/+qNjPZZ7F5hFmYmRh",
     "categoria": "peliculas",
     "is_forum": false,
-    "ultimo_id_sincronizado": 5919,
+    "ultimo_id_sincronizado": 5921,
     "activo": true
   },
   {
@@ -69,7 +69,7 @@
     "invite_link": "https://t.me/+FTpg2qBHORMwNTNh",
     "categoria": "kids",
     "is_forum": false,
-    "ultimo_id_sincronizado": 520,
+    "ultimo_id_sincronizado": 525,
     "activo": true
   },
   {
@@ -81,7 +81,7 @@
     "invite_link": "https://t.me/+J15eKBk0lHBhZmQx",
     "categoria": "kids",
     "is_forum": true,
-    "ultimo_id_sincronizado": 31348,
+    "ultimo_id_sincronizado": 31351,
     "activo": true
   },
   {
@@ -93,7 +93,7 @@
     "invite_link": "https://t.me/+m7sa99fLDM1hODFh",
     "categoria": "anime",
     "is_forum": false,
-    "ultimo_id_sincronizado": 22883,
+    "ultimo_id_sincronizado": 22886,
     "activo": true
   },
   {
@@ -105,7 +105,7 @@
     "invite_link": "https://t.me/+6Ovdscxg-Cg1MGYx",
     "categoria": "anime",
     "is_forum": true,
-    "ultimo_id_sincronizado": 23535,
+    "ultimo_id_sincronizado": 23536,
     "activo": true
   },
   {
@@ -129,7 +129,7 @@
     "invite_link": "https://t.me/+tvXNYjhQjokzOWQ5",
     "categoria": "series",
     "is_forum": true,
-    "ultimo_id_sincronizado": 4193,
+    "ultimo_id_sincronizado": 121009,
     "activo": true,
     "topic_id": 5
   },
@@ -142,7 +142,7 @@
     "invite_link": "https://t.me/+Jb3mNj8JybczYzcx",
     "categoria": "series",
     "is_forum": true,
-    "ultimo_id_sincronizado": 55411,
+    "ultimo_id_sincronizado": 55502,
     "activo": true
   },
   {
@@ -155,7 +155,7 @@
     "invite_link": "https://t.me/+m55509Q2gDZkNjMx",
     "categoria": "documentales",
     "is_forum": false,
-    "ultimo_id_sincronizado": 1626788,
+    "ultimo_id_sincronizado": 1635866,
     "filtro_inteligente": "documentales",
     "activo": true
   },
@@ -169,7 +169,7 @@
     "invite_link": "https://t.me/+ip5U3FLPTm8zY2Yx",
     "categoria": "musica",
     "is_forum": false,
-    "ultimo_id_sincronizado": 321859,
+    "ultimo_id_sincronizado": 327213,
     "activo": true
   },
   {
@@ -181,7 +181,7 @@
     "invite_link": "https://t.me/+ldiiLRsHWXw0MzQx",
     "categoria": "sagas",
     "is_forum": true,
-    "ultimo_id_sincronizado": 520,
+    "ultimo_id_sincronizado": 548,
     "activo": true
   }
 ]
