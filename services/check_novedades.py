@@ -53,11 +53,17 @@ async def check():
         return
 
     canales = []
-    # Obtener la versión maestra y en tiempo real directamente desde GitHub CDN (sin límite de API)
+    # Obtener la versión maestra y en tiempo real directamente desde GitHub CDN con cache-buster
     try:
         import urllib.request
-        api_url = "https://raw.githubusercontent.com/felipesalle/teveflipe-bot-sync/main/canales_map.json"
-        req = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
+        import time
+        ts = int(time.time())
+        api_url = f"https://raw.githubusercontent.com/felipesalle/teveflipe-bot-sync/main/canales_map.json?t={ts}"
+        req = urllib.request.Request(api_url, headers={
+            'User-Agent': 'Mozilla/5.0',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+        })
         with urllib.request.urlopen(req, timeout=5) as resp:
             if resp.status == 200:
                 canales = json.loads(resp.read().decode('utf-8'))
@@ -108,7 +114,16 @@ async def check():
                         new_msgs = await c.get_messages(ent, min_id=last_id, limit=30)
                         
                     seen = set()
-                    media_msgs = [m for m in new_msgs if not m.action and (m.file or m.text)]
+                    media_msgs = []
+                    for m in new_msgs:
+                        if m.action:
+                            continue
+                        fn = (m.file.name if m.file else "") or ""
+                        fn_l = fn.lower()
+                        if fn_l.endswith(('.txt', '.nfo', '.torrent', '.iso', '.exe', '.zip')) or re.search(r'\.zip(?:\.\d+)?$', fn_l):
+                            continue
+                        if m.file or m.text:
+                            media_msgs.append(m)
                     actual_file_count = len(media_msgs)
                     
                     for m in media_msgs:
